@@ -1,0 +1,65 @@
+text_model:
+  max_concurrency: 3
+  retry_max: 3
+  retry_base_seconds: 1
+  providers:
+    gpt-5.4:
+      api_key: ${GPT54_API_KEY}
+      base_url: https://api.yaps.cn/v1
+      model: gpt-5.4
+      api: openai-responses
+      context_window: 272000
+      max_tokens: 8192
+    kimi-k2.5:
+      api_key: ${KIMI_API_KEY}
+      base_url: https://api.moonshot.cn/v1
+      model: kimi-k2-5
+      max_tokens: 4096
+    deepseek:
+      api_key: ${DEEPSEEK_API_KEY}
+      base_url: https://api.deepseek.com/v1
+      model: deepseek-chat
+      max_tokens: 4096
+
+image_model:
+  max_concurrency: 2
+  retry_max: 3
+  retry_base_seconds: 1
+  providers:
+    nanobanana-2:
+      api_key: ${NANOBANANA_API_KEY}
+      base_url: https://runapi.co
+      model: gemini-3.1-flash-image-preview
+      aspect_ratio: "9:16"
+      image_size: "1K"
+    volcengine-seedream:
+      api_key: ${VOLCENGINE_API_KEY}
+      base_url: https://ark.cn-beijing.volces.com/api/v3
+      model: doubao-seedream-4-0-250828
+      size: "1024x1024"
+
+video_model:
+  max_concurrency: 1
+  retry_max: 3
+  retry_base_seconds: 1
+  providers:
+    veo-3:
+      api_key: ${VEO_API_KEY}
+      base_url: ${VEO_BASE_URL}
+    volcengine-seedance:
+      api_key: ${VOLCENGINE_API_KEY}
+      base_url: https://ark.cn-beijing.volces.com/api/v3
+      model: doubao-seedance-1-0-pro-250528
+      resolution: "720p"
+      ratio: "16:9"
+
+vision_model:
+  max_concurrency: 1
+  retry_max: 2        # lower than text/image — vision analysis is best-effort
+  retry_base_seconds: 1
+  providers:
+    kimi-vision:
+      api_key: ${KIMI_API_KEY}
+      base_url: https://api.moonshot.cn/v1
+      model: moonshot-v1-8k-vision-preview
+      max_tokens: 1024

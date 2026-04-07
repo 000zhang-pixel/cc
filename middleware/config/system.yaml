@@ -1,0 +1,26 @@
+feishu:
+  app_id: ${LARK_APP_ID}
+  app_secret: ${LARK_APP_SECRET}
+  base_token: ${LARK_BASE_TOKEN}
+
+  tables:
+    sku:          tblf9FAsQuUzvCzK
+    plan:         tblDJ2hCvl7y4x5s
+    prompt:       tbljMPKdYbGTb1K7
+    content:      tblieT8ZK8HOQt0x
+    publish:      tblLbA8gjwYbaMLB
+    material:     tblGJiZBPiK2OdoO
+    tag:          tblsnxUwqY1WgEAQ
+    strategy:     tblu2EzR78tWjYf6   # 表8 内容策略表，运行 setup_base.py 后填入
+    shotplan:     tbl0xCaqru1TjwzK   # 表9 拍摄方案表
+    scene:        tbliWlwiyA4sppgY   # 表10 视觉场景表
+
+poller:
+  interval_seconds: 10
+
+local_storage:
+  root: ${LOCAL_STORAGE_ROOT}
+
+publish:
+  dewu:
+    engine_script: "D:/AI-Content-Hub/publish-engine/publish_engine_v40.sh"

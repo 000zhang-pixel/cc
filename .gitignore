@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.DS_Store
+content-store/
+logs/
+*.log
+.claude/
+.superpowers/
+middleware/_launcher.vbs
+middleware/run_middleware.bat

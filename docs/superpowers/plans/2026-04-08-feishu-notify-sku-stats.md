@@ -41,7 +41,16 @@
 notifications:
   enabled: true
   chat_id: "oc_2a18512a232920019a216346de01379a"
+  notify_on:
+    queued: false    # 待发布进队 — Base表可查，默认静默
+    success: true    # 发布成功 — 运营确认用，可关
+    failure: true    # 发布失败 — 必报，需人工处理
 ```
+
+**子开关说明**：
+- `queued`：待发布进队通知，信息价值低（Base表本身可查队列），默认关闭
+- `success`：发布成功通知，用于运营确认，可在发布高峰期手动关闭
+- `failure`：发布失败通知，必报，需人工处理，建议始终开启
 
 ### 关键实现
 

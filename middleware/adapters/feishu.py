@@ -7,6 +7,10 @@ import logging
 from typing import Any
 
 import lark_oapi as lark
+from lark_oapi.api.im.v1 import (
+    CreateMessageRequest,
+    CreateMessageRequestBody,
+)
 from lark_oapi.api.bitable.v1 import (
     ListAppTableRecordRequest,
     GetAppTableRecordRequest,
@@ -214,3 +218,59 @@ class FeishuClient:
                 f"(file_token={file_token})"
             )
         return resp.file.read()
+
+    def send_group_text(self, chat_id: str, text: str) -> None:
+        """Send a plain-text message to a Feishu group chat.
+
+        Fails silently (logs warning) so notification errors never block the main flow.
+        """
+        import json
+        try:
+            body = CreateMessageRequestBody.builder() \
+                .receive_id(chat_id) \
+                .msg_type("text") \
+                .content(json.dumps({"text": text})) \
+                .build()
+            resp = self._client.im.v1.message.create(
+                CreateMessageRequest.builder()
+                .receive_id_type("chat_id")
+                .request_body(body)
+                .build()
+            )
+            if not resp.success():
+                logger.warning(
+                    "send_group_text failed [%s]: %s (chat_id=%s)",
+                    resp.code, resp.msg, chat_id
+                )
+        except Exception as exc:
+            logger.warning("send_group_text exception: %s", exc)
+
+    def send_group_card(self, chat_id: str, card: dict) -> None:
+        """Send an interactive card message to a Feishu group chat.
+
+        Args:
+            chat_id: Feishu group chat_id
+            card: Card JSON dict (will be wrapped in {"config": {...}, "elements": [...]})
+
+        Fails silently (logs warning) so notification errors never block the main flow.
+        """
+        import json
+        try:
+            body = CreateMessageRequestBody.builder() \
+                .receive_id(chat_id) \
+                .msg_type("interactive") \
+                .content(json.dumps(card)) \
+                .build()
+            resp = self._client.im.v1.message.create(
+                CreateMessageRequest.builder()
+                .receive_id_type("chat_id")
+                .request_body(body)
+                .build()
+            )
+            if not resp.success():
+                logger.warning(
+                    "send_group_card failed [%s]: %s (chat_id=%s)",
+                    resp.code, resp.msg, chat_id
+                )
+        except Exception as exc:
+            logger.warning("send_group_card exception: %s", exc)

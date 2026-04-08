@@ -14,6 +14,7 @@ feishu:
     strategy:     tblu2EzR78tWjYf6   # 表8 内容策略表，运行 setup_base.py 后填入
     shotplan:     tbl0xCaqru1TjwzK   # 表9 拍摄方案表
     scene:        tbliWlwiyA4sppgY   # 表10 视觉场景表
+    sku_stats:    tblJRHExnxytve7s   # SKU发布统计表
 
 poller:
   interval_seconds: 10
@@ -24,3 +25,7 @@ local_storage:
 publish:
   dewu:
     engine_script: "D:/AI-Content-Hub/publish-engine/publish_engine_v40.sh"
+
+notifications:
+  enabled: true
+  chat_id: "oc_2a18512a232920019a216346de01379a"

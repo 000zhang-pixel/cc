@@ -51,13 +51,14 @@ def main():
     logger.info("LocalStorage root: %s", storage_root)
 
     publish_cfg = sys_cfg.get("publish", {})
+    notifications_cfg = sys_cfg.get("notifications", {})
 
     # --- Build handlers ---
     handlers = {
         TASK_CONTENT_GENERATION: ContentGenerationHandler(feishu, tables, model_params, storage),
         TASK_MATERIAL_MIGRATION: MaterialMigrationHandler(feishu, tables, storage),
-        TASK_PUBLISH_RECORD_CREATE: PublishRecordCreatorHandler(feishu, tables, storage),
-        TASK_PUBLISH: PublishHandler(feishu, tables, storage, publish_cfg),
+        TASK_PUBLISH_RECORD_CREATE: PublishRecordCreatorHandler(feishu, tables, storage, notifications_cfg),
+        TASK_PUBLISH: PublishHandler(feishu, tables, storage, publish_cfg, notifications_cfg),
         TASK_MATERIAL_ANALYSIS: MaterialAnalysisHandler(feishu, tables, model_params),
     }
 

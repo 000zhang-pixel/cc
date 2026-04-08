@@ -281,6 +281,8 @@ class PublishHandler:
         """Send a '发布成功' green card to the configured Feishu group."""
         if not self._notifications.get("enabled"):
             return
+        if not self._notifications.get("notify_on", {}).get("success", True):
+            return
         chat_id = self._notifications.get("chat_id", "").strip()
         if not chat_id:
             return
@@ -336,6 +338,8 @@ class PublishHandler:
     ) -> None:
         """Send a '发布失败' red card to the configured Feishu group."""
         if not self._notifications.get("enabled"):
+            return
+        if not self._notifications.get("notify_on", {}).get("failure", True):
             return
         chat_id = self._notifications.get("chat_id", "").strip()
         if not chat_id:

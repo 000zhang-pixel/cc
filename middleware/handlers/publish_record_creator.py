@@ -131,6 +131,8 @@ class PublishRecordCreatorHandler:
         """Send a '待发布' card to the configured Feishu group."""
         if not self._notifications.get("enabled"):
             return
+        if not self._notifications.get("notify_on", {}).get("queued", True):
+            return
         chat_id = self._notifications.get("chat_id", "").strip()
         if not chat_id:
             return

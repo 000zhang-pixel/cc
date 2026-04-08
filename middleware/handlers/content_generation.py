@@ -627,6 +627,13 @@ class ContentGenerationHandler:
         style_words = scene.get("风格基调词", "").strip()
         exclude     = scene.get("排除描述", "").strip()
 
+        # Person fields from scene record
+        person_type = scene.get("人物类型", "").strip()
+        gender      = scene.get("性别倾向", "").strip()
+        age_range   = scene.get("年龄段", "").strip()
+        appearance  = scene.get("外貌风格", "").strip()
+        posture     = scene.get("姿态倾向", "").strip()
+
         emotion_zh = f.get_option(strategy, "情绪基调") if strategy else ""
         mood_zh    = self._EMOTION_ZH.get(emotion_zh, "自然真实")
 
@@ -635,6 +642,17 @@ class ContentGenerationHandler:
             "",
             f"【场景】{scene_zh}" if scene_zh else "",
             f"风格：{style_words}。情绪：{mood_zh}。" if style_words else f"情绪：{mood_zh}。",
+        ]
+
+        # Inject person descriptor only when scene involves a real person
+        if person_type and person_type not in ("无人物",):
+            person_attrs = [x for x in [gender, age_range, appearance, posture] if x]
+            person_line = person_type
+            if person_attrs:
+                person_line += "，" + "，".join(person_attrs)
+            parts += ["", f"【人物】{person_line}"]
+
+        parts += [
             "",
             "【一致性要求】",
             "- 所有图片保持完全相同的产品外观（颜色、材质、细节）",

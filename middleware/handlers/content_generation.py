@@ -798,12 +798,18 @@ class ContentGenerationHandler:
             posture   = scene.get("姿态倾向", "").strip()
             person_attrs = "、".join(x for x in [gender, age, appear, posture] if x)
             person_suffix = f"，画面中有{person_type}" + (f"（{person_attrs}）" if person_attrs else "")
+            # Consistency anchor: all shots in the same group must feature the identical person
+            consistency_note = (
+                "，【一致性约束】本组所有图片为同一人物："
+                "保持完全相同的服装（颜色/款式/细节）、相同发型、相同面孔特征，禁止更换服装或人物"
+            )
         else:
             person_suffix = ""
+            consistency_note = ""
 
         def _default_shot(idx: int) -> str:
             role = self._DEFAULT_SHOT_ROLES[idx % len(self._DEFAULT_SHOT_ROLES)]
-            return f"第{idx + 1}张：{role}{scene_suffix}{person_suffix}"
+            return f"第{idx + 1}张：{role}{scene_suffix}{person_suffix}{consistency_note}"
 
         if shotplan is None:
             return [_default_shot(i) for i in range(img_count)]
@@ -841,7 +847,7 @@ class ContentGenerationHandler:
 
                 zh_text = zh_text.replace("{scene_description}", scene_zh)
                 if zh_text:
-                    result.append(f"第{i + 1}张：{zh_text}{scene_suffix}{person_suffix}")
+                    result.append(f"第{i + 1}张：{zh_text}{scene_suffix}{person_suffix}{consistency_note}")
                 else:
                     result.append(_default_shot(i))
             else:

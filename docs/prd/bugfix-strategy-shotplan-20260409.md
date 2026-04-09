@@ -114,10 +114,87 @@ CONTENT_TYPES = [
 
 ---
 
-## 复盘：为什么会出现字段名不匹配
+---
+
+## Bug 3 — Shotplan 完全返回 None，_DEFAULT_SHOT_ROLES 兜底再现
+
+### 根因
+
+即使修复了 Bug 1（节点字段名），图片仍全是极简主体图。根因是 `_lookup_shotplan()` 在命中
+任何 SP010-SP019 之前就已返回 `None`，有两个独立失败点：
+
+**失败点 A — `适用内容形态` 枚举不匹配**
+
+代码（`content_generation.py` 第803行）调用：
+
+```python
+shotplan = self._lookup_shotplan("图片生成", content_type, category)
+```
+
+但 SP010-SP019 在飞书中的 `适用内容形态` 值为 `["图片"]`，不包含 `"图片生成"` → `form_matched` 列表永远为空。
+
+```python
+form_matched = [
+    r for r in records
+    if content_form in (self._feishu.get_options(r, "适用内容形态") or [])
+]
+candidates = form_matched if form_matched else records  # 退回全量
+```
+
+虽然有兜底回全量，但接着：
+
+**失败点 B — `适用内容类型` 仍是无效值 `["图文"]`**
+
+SP010-SP019 的 `适用内容类型` 与 Bug 2 同样错误地填写为 `["图文"]`（不在 CONTENT_TYPES 枚举中），
+导致 `_select_best()` 打分为 0。若全表所有手机链方案都是0分，则退回第一条——
+实际上手机链 SP 全部 0 分，退回的仍是 SP001（手机壳方案），但 SP001 `适用品类=["手机壳"]`
+也不匹配 `"手机链"` 的 category，最终 `_select_best()` 返回 `None`。
+
+**双重失败结果**：`_lookup_shotplan()` 返回 `None` → `_build_image_sub_prompts(None, ...)` 触发
+`_DEFAULT_SHOT_ROLES` 六个产品图兜底，每次生成图片全是极简背景主体图。
+
+### 修复
+
+**代码修复**（`content_generation.py`）：
+
+将第803行传参从 `"图片生成"` 改为 `"图片"`，与飞书实际存储值对齐：
+
+```python
+# before
+shotplan = self._lookup_shotplan("图片生成", content_type, category)
+# after
+shotplan = self._lookup_shotplan("图片", content_type, category)
+```
+
+**飞书数据修复**（`fix_shotplan_content_types.py`）：
+
+将 SP010-SP019 的 `适用内容类型` 从 `["图文"]` 修正为各方案主题对应的真实枚举值：
+
+| 编号 | 方案主题 | 适用内容类型 |
+|------|---------|------------|
+| SP010 | 穿搭点睛型 | 穿搭搭配、种草推荐 |
+| SP011 | 工艺品质型 | 深度测评、场景展示 |
+| SP012 | 拆箱仪式感型 | 开箱、好物分享 |
+| SP013 | 对比测评型 | 对比测评、选购攻略/使用教程 |
+| SP014 | 日常生活化型 | 日常vlog、场景展示 |
+| SP015 | 多款展示型 | 穿搭搭配、好物分享 |
+| SP016 | 礼物情感型 | 节日/活动限定、种草推荐 |
+| SP017 | 叠戴搭配型 | 穿搭搭配、种草推荐 |
+| SP018 | 美学平铺型 | 种草推荐、好物分享 |
+| SP019 | 校园青春型 | 场景展示、种草推荐 |
+
+---
+
+## 复盘：为什么会出现字段名不匹配和枚举不一致
 
 历史原因：拍摄方案节点格式最初设计为 `{"zh": "...", "en": "..."}` 双语，
 后来写入数据时改用了 `{"shot": "...", "desc": "..."}` 描述性格式，
 但代码侧未同步更新。属于数据约定与代码约定脱节的典型问题。
 
-**后续建议**：在 `fix_strategies_and_shotplans.py` 或配置文档中明确约定节点 JSON schema。
+`适用内容形态` 和 `适用内容类型` 填写的值（`"图片生成"`/`"图文"`）从未被系统使用过——
+既不在代码传参枚举里，也不在 CONTENT_TYPES 里——属于数据录入时未对齐业务枚举的问题。
+
+**后续建议**：
+1. 在 `fix_strategies_and_shotplans.py` 或配置文档中明确约定节点 JSON schema
+2. 飞书表字段使用"单选/多选"并限定枚举值，防止自由输入导致枚举漂移
+3. 在 `_lookup_shotplan()` / `_lookup_strategy()` 中加日志，当 `_select_best()` 返回 None 时打印告警

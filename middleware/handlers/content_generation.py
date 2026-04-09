@@ -800,7 +800,7 @@ class ContentGenerationHandler:
                 )
                 if g["type"] == "img":
                     img_count = g.get("img_per_piece", 4)
-                    shotplan = self._lookup_shotplan("图片生成", content_type, category)
+                    shotplan = self._lookup_shotplan("图片", content_type, category)
                     master = self._build_image_master_prompt(strategy, sku_fields, scene)
                     subs = self._build_image_sub_prompts(shotplan, scene, img_count)
                     f.update_record(table_prompt, record_id, {

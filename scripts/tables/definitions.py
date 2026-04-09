@@ -167,7 +167,8 @@ TABLES: list[dict] = [
             {"field_name": "备注",           "type": TEXT},
         ],
         "links": [
-            {"field_name": "关联SKU", "target_table": "SKU信息表"},
+            {"field_name": "关联SKU",     "target_table": "SKU信息表"},
+            {"field_name": "关联拍摄方案", "target_table": "拍摄方案表"},
         ],
         "lookups": [],
     },

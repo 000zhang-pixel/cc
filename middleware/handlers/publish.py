@@ -26,6 +26,7 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
+import db
 from adapters.feishu import FeishuClient
 from core.local_storage import LocalStorage
 from core.task import Task
@@ -81,6 +82,8 @@ class PublishHandler:
                         sku_name = self._feishu.get_text(s_rec, "SKU名称").strip()
             except Exception:
                 pass
+            db.update_publish_status(pub_code, pub_status="发布失败")
+            db.log_exc("publish", 0, f"PublishHandler failed: {exc}", entity_code=pub_code)
             self._notify_card_failure(pub_code, platform, form_type, sku_name, title_preview, str(exc)[:120])
             # SKU stats
             try:
@@ -136,6 +139,9 @@ class PublishHandler:
                 "发布状态": "已发布",
                 "实际发布时间": int(datetime.now().timestamp() * 1000),
             })
+            db.update_publish_status(pub_code, pub_status="已发布",
+                                     published_at=datetime.utcnow())
+            db.log_task("publish", 0, "INFO", "手动发布标记已发布", entity_code=pub_code)
             if self._storage and plan_code and group_id:
                 try:
                     self._storage.update_status(plan_code, group_id, "published")
@@ -238,6 +244,9 @@ class PublishHandler:
                 "发布状态": "已发布",
                 "实际发布时间": int(datetime.now().timestamp() * 1000),
             })
+            db.update_publish_status(pub_code, pub_status="已发布",
+                                     published_at=datetime.utcnow())
+            db.log_task("publish", 0, "INFO", "得物发布成功", entity_code=pub_code)
             if self._storage:
                 try:
                     plan_code, group_id = _parse_content_code(content_code)

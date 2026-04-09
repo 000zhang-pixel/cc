@@ -16,6 +16,7 @@ import logging
 import random
 from datetime import datetime
 
+import db
 from adapters.feishu import FeishuClient
 from adapters.ai_models import (
     TextModelAdapter,
@@ -73,6 +74,17 @@ class ContentGenerationHandler:
         record_id = task.record_id
         table_plan = self._tables["plan"]
 
+        # Mark plan as started in local DB (best-effort — plan may not yet be synced)
+        plan_code = task.extra.get("plan_code") if task.extra else None
+        if not plan_code:
+            try:
+                pr = self._feishu.get_record(table_plan, record_id)
+                plan_code = self._feishu.get_text(pr, "规划编号").strip() or None
+            except Exception:
+                pass
+        if plan_code:
+            db.mark_plan_started(plan_code)
+
         try:
             self._run(record_id)
         except Exception as exc:
@@ -81,6 +93,9 @@ class ContentGenerationHandler:
                 "执行状态": "失败",
                 "任务日志": str(exc),
             })
+            if plan_code:
+                db.mark_plan_failed(plan_code, str(exc)[:500])
+                db.log_exc("plan", 0, f"ContentGeneration failed: {exc}")
 
     # ------------------------------------------------------------------
     def _run(self, record_id: str):
@@ -150,6 +165,10 @@ class ContentGenerationHandler:
                 f"共生成 {len(content_record_ids)} 条内容记录"
             ),
         })
+        db.mark_plan_done(plan_code)
+        db.log_task("plan", 0, "INFO",
+                    f"ContentGeneration complete: {len(content_record_ids)} content records",
+                    entity_code=plan_code)
         logger.info("ContentGeneration complete for plan %s (%d records)", record_id, len(content_record_ids))
 
     # ------------------------------------------------------------------
@@ -299,22 +318,32 @@ class ContentGenerationHandler:
 
     def _build_groups(self, cfg: dict) -> list[dict]:
         groups = []
-        content_types = cfg["content_types"] or CONTENT_TYPES
+        content_types = list(cfg["content_types"] or CONTENT_TYPES)
+        total = cfg["img_count"] + cfg["vid_count"]
+
+        # Shuffle once, then cycle round-robin to avoid duplicates across posts
+        shuffled = content_types[:]
+        random.shuffle(shuffled)
+        pool = [shuffled[i % len(shuffled)] for i in range(total)]
+        idx = 0
+
         for i in range(1, cfg["img_count"] + 1):
             groups.append({
                 "group_id": f"img{i:02d}",
                 "type": "img",
-                "content_type": random.choice(content_types),
+                "content_type": pool[idx],
                 "img_per_piece": cfg["img_per_piece"],
             })
+            idx += 1
         for i in range(1, cfg["vid_count"] + 1):
             groups.append({
                 "group_id": f"vid{i:02d}",
                 "type": "vid",
-                "content_type": random.choice(content_types),
+                "content_type": pool[idx],
                 "vid_min_sec": cfg["vid_min_sec"],
                 "vid_max_sec": cfg["vid_max_sec"],
             })
+            idx += 1
         return groups
 
     # ------------------------------------------------------------------
@@ -933,6 +962,18 @@ class ContentGenerationHandler:
             content_record_id = f.create_record(table_content, content_fields)
             content_record_ids.append(content_record_id)
 
+            # Mirror to local DB
+            db.upsert_content(
+                content_code,
+                feishu_record_id=content_record_id,
+                plan_id=None,   # syncer will resolve FK later
+                task_type=task_type,
+                target_platform=cfg["platforms"][0] if cfg["platforms"] else "",
+                content_type=g["content_type"],
+                content_form=content_fields["内容形态"],
+                gen_status="生成中",
+            )
+
             # Create skeleton content.json in local storage
             if self._storage:
                 try:
@@ -1096,6 +1137,10 @@ class ContentGenerationHandler:
                 update["生成状态"] = "已生成"
 
             f.update_record(table_content, content_record_id, update)
+            db.update_content_status(
+                content_code,
+                gen_status="生成失败" if fail_reason else "已生成",
+            )
 
             # Mark prompts as 已使用
             for pr in [c_pr, i_pr]:

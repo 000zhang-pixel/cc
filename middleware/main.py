@@ -4,9 +4,14 @@ Run from the middleware/ directory:
     python main.py
 """
 import logging
-import queue
+import logging.handlers
 import signal
 import sys
+import threading
+from pathlib import Path
+
+# Make project root importable for db package
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from adapters.feishu import FeishuClient
 from core.config import load_system, load_model_params
@@ -26,12 +31,44 @@ from handlers.publish_record_creator import PublishRecordCreatorHandler
 from handlers.material_analysis import MaterialAnalysisHandler
 from handlers.material_migration import MaterialMigrationHandler
 
+import db
+from db.migrate import run_migrations
+from db.sync import FeishuSyncer
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[
+        logging.StreamHandler(),
+        logging.handlers.RotatingFileHandler(
+            filename=Path(__file__).parent.parent / "logs" / "middleware.log",
+            maxBytes=10 * 1024 * 1024,   # 10 MB
+            backupCount=5,
+            encoding="utf-8",
+        ),
+    ],
 )
 logger = logging.getLogger(__name__)
+
+# Incremental sync interval (seconds)
+_SYNC_INTERVAL = 300  # 5 minutes
+
+
+def _start_sync_timer(syncer: FeishuSyncer):
+    """Run incremental sync every _SYNC_INTERVAL seconds in a daemon thread."""
+    def _loop():
+        import time
+        while True:
+            time.sleep(_SYNC_INTERVAL)
+            try:
+                logger.info("[Sync] Incremental sync started")
+                syncer.sync_all()
+            except Exception as e:
+                logger.error("[Sync] Incremental sync failed: %s", e)
+
+    t = threading.Thread(target=_loop, daemon=True, name="feishu-syncer")
+    t.start()
 
 
 def main():
@@ -52,6 +89,23 @@ def main():
 
     publish_cfg = sys_cfg.get("publish", {})
     notifications_cfg = sys_cfg.get("notifications", {})
+
+    # --- Init local DB ---
+    run_migrations()                 # alembic upgrade head（已是最新则 no-op）
+    engine = db._get_engine()
+    db.init_engine(engine)
+    logger.info("Local DB initialised: %s", engine.url)
+
+    # --- Initial full sync from Feishu ---
+    syncer = FeishuSyncer(feishu, tables, engine)
+    try:
+        logger.info("[Sync] Running startup sync…")
+        syncer.sync_all()
+    except Exception as e:
+        logger.error("[Sync] Startup sync failed (non-fatal): %s", e)
+
+    # --- Start incremental sync timer ---
+    _start_sync_timer(syncer)
 
     # --- Build handlers ---
     handlers = {

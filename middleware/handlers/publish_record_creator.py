@@ -5,6 +5,7 @@ auto-create a 表5 发布执行表 record (first-time only).
 import logging
 from datetime import datetime
 
+import db
 from adapters.feishu import FeishuClient
 from core.local_storage import LocalStorage
 from core.task import Task
@@ -63,6 +64,10 @@ class PublishRecordCreatorHandler:
             logger.info(
                 "Created publish record %s for content %s", pub_code, content_record_id
             )
+            db.upsert_publish_record(pub_code, pub_status="待发布")
+            db.log_task("publish", 0, "INFO",
+                        f"PublishRecord created for content {content_record_id}",
+                        entity_code=pub_code)
             # Build enriched card data from content record
             platform = f.get_option(content_rec, "目标平台") or "得物"
             form_type = f.get_option(content_rec, "内容形态") or ""

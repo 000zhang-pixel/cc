@@ -12,6 +12,7 @@ import logging
 import re
 from datetime import datetime
 
+import db
 from adapters.feishu import FeishuClient
 from adapters.ai_models import TextModelAdapter, build_text_adapter
 from core.task import Task
@@ -37,6 +38,7 @@ class MaterialAnalysisHandler:
             f.update_record(table_material, record_id, {
                 "分析状态": "分析失败",
             })
+            db.log_exc("material", 0, f"MaterialAnalysis failed: {exc}")
 
     def _run(self, record_id: str):
         f = self._feishu
@@ -104,6 +106,8 @@ class MaterialAnalysisHandler:
                 update[feishu_field] = val
 
         f.update_record(table_material, record_id, update)
+        db.log_task("material", 0, "INFO",
+                    f"MaterialAnalysis complete (platform={platform})")
         logger.info("MaterialAnalysis complete for record %s (platform=%s)", record_id, platform)
 
     # ------------------------------------------------------------------

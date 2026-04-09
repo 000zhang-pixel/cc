@@ -18,6 +18,7 @@ import re
 import shutil
 from pathlib import Path
 
+import db
 from adapters.feishu import FeishuClient
 from core.local_storage import LocalStorage
 from core.task import Task
@@ -74,6 +75,7 @@ class MaterialMigrationHandler:
                 "搬迁状态": "搬迁失败",
                 "失败原因": str(exc),
             })
+            db.log_exc("content", 0, f"MaterialMigration failed: {exc}")
 
     def _run(self, record_id: str):
         f = self._feishu
@@ -150,6 +152,10 @@ class MaterialMigrationHandler:
             "素材文件夹路径": str(target_dir),
             "搬迁状态": "已完成",
         })
+        db.update_content_status(content_code, migrate_status="已完成")
+        db.log_task("content", 0, "INFO",
+                    f"MaterialMigration complete: {copied} file(s) → {target_dir}",
+                    entity_code=content_code)
         logger.info(
             "MaterialMigration complete for %s: %d file(s) → %s",
             content_code, copied, target_dir,

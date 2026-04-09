@@ -1,0 +1,1322 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Content Hub</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    darkMode: 'class',
+    theme: {
+      extend: {
+        colors: {
+          zinc: { 950: '#09090b' },
+          indigo: { 950: '#1e1b4b' },
+        },
+        fontFamily: {
+          mono: ['JetBrains Mono', 'Fira Code', 'Cascadia Code', 'monospace'],
+        }
+      }
+    }
+  }
+</script>
+<script src="https://unpkg.com/htmx.org@1.9.12"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&display=swap');
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: #09090b;
+    color: #a1a1aa;
+    font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
+    font-size: 13px;
+  }
+
+  /* ── Scrollbar ── */
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #27272a; border-radius: 2px; }
+  ::-webkit-scrollbar-thumb:hover { background: #3f3f46; }
+
+  /* ── Badges ── */
+  .badge {
+    display: inline-flex; align-items: center;
+    padding: 1px 7px; border-radius: 3px;
+    font-size: 11px; font-weight: 500; letter-spacing: 0.02em;
+    font-family: 'JetBrains Mono', monospace;
+    white-space: nowrap;
+  }
+  .badge::before { content: ''; width: 5px; height: 5px; border-radius: 50%; margin-right: 5px; flex-shrink: 0; }
+
+  /* Plan statuses */
+  .badge-执行中 { background: #1e3a5f; color: #60a5fa; }
+  .badge-执行中::before { background: #60a5fa; }
+  .badge-完成   { background: #14532d20; color: #4ade80; border: 1px solid #166534; }
+  .badge-完成::before { background: #4ade80; }
+  .badge-失败   { background: #7f1d1d20; color: #f87171; border: 1px solid #7f1d1d; }
+  .badge-失败::before { background: #f87171; }
+  .badge-待执行 { background: #27272a; color: #71717a; }
+  .badge-待执行::before { background: #52525b; }
+
+  /* Content statuses */
+  .badge-已生成    { background: #14532d20; color: #4ade80; border: 1px solid #166534; }
+  .badge-已生成::before { background: #4ade80; }
+  .badge-生成中    { background: #1e3a5f; color: #60a5fa; }
+  .badge-生成中::before { background: #60a5fa; box-shadow: 0 0 0 3px #1e3a5f40; animation: pulse 1.5s infinite; }
+  .badge-生成失败  { background: #7f1d1d20; color: #f87171; border: 1px solid #7f1d1d; }
+  .badge-生成失败::before { background: #f87171; }
+
+  /* Review statuses */
+  .badge-待审核 { background: #451a0320; color: #fb923c; border: 1px solid #78350f; }
+  .badge-待审核::before { background: #fb923c; }
+  .badge-已通过 { background: #14532d20; color: #4ade80; border: 1px solid #166534; }
+  .badge-已通过::before { background: #4ade80; }
+  .badge-已拒绝 { background: #7f1d1d20; color: #f87171; border: 1px solid #7f1d1d; }
+  .badge-已拒绝::before { background: #f87171; }
+
+  /* Publish statuses */
+  .badge-已发布   { background: #14532d20; color: #4ade80; border: 1px solid #166534; }
+  .badge-已发布::before { background: #4ade80; }
+  .badge-待发布   { background: #451a0320; color: #fb923c; border: 1px solid #78350f; }
+  .badge-待发布::before { background: #fb923c; }
+  .badge-发布中   { background: #1e3a5f; color: #60a5fa; }
+  .badge-发布中::before { background: #60a5fa; animation: pulse 1.5s infinite; }
+  .badge-发布失败 { background: #7f1d1d20; color: #f87171; border: 1px solid #7f1d1d; }
+  .badge-发布失败::before { background: #f87171; }
+
+  /* Misc */
+  .badge-已上架 { background: #14532d20; color: #4ade80; border: 1px solid #166534; }
+  .badge-已上架::before { background: #4ade80; }
+  .badge-待上架 { background: #27272a; color: #a1a1aa; }
+  .badge-待上架::before { background: #52525b; }
+  .badge-下架   { background: #7f1d1d20; color: #f87171; border: 1px solid #7f1d1d; }
+  .badge-下架::before { background: #f87171; }
+
+  @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.4; } }
+
+  /* ── Table ── */
+  .data-table { width: 100%; border-collapse: collapse; }
+  .data-table thead th {
+    padding: 8px 12px; text-align: left;
+    font-size: 11px; font-weight: 500; letter-spacing: 0.05em; text-transform: uppercase;
+    color: #52525b; background: #111113;
+    border-bottom: 1px solid #27272a;
+  }
+  .data-table tbody tr {
+    border-bottom: 1px solid #18181b;
+    transition: background 0.1s;
+  }
+  .data-table tbody tr:hover { background: #111113; }
+  .data-table tbody td {
+    padding: 8px 12px; color: #a1a1aa; vertical-align: middle;
+  }
+  .data-table tbody td.primary { color: #e4e4e7; font-weight: 500; }
+  .data-table tbody td.mono { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #818cf8; }
+  .data-table tbody td.muted { color: #52525b; font-size: 11px; }
+
+  /* ── Buttons ── */
+  .btn { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 4px; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.1s; border: 1px solid transparent; }
+  .btn-ghost { background: transparent; border-color: #27272a; color: #71717a; }
+  .btn-ghost:hover { background: #18181b; color: #a1a1aa; }
+  .btn-primary { background: #4f46e5; border-color: #4338ca; color: #fff; }
+  .btn-primary:hover { background: #4338ca; }
+  .btn-success { background: transparent; border-color: #166534; color: #4ade80; }
+  .btn-success:hover { background: #14532d20; }
+  .btn-danger { background: transparent; border-color: #7f1d1d; color: #f87171; }
+  .btn-danger:hover { background: #7f1d1d20; }
+  .btn-warn { background: transparent; border-color: #78350f; color: #fb923c; }
+  .btn-warn:hover { background: #451a0320; }
+  .btn-purple { background: transparent; border-color: #581c87; color: #c084fc; }
+  .btn-purple:hover { background: #3b0764; }
+
+  /* ── Form controls ── */
+  .form-select, .form-input {
+    background: #18181b; border: 1px solid #27272a; border-radius: 4px;
+    color: #e4e4e7; padding: 5px 10px; font-size: 12px;
+    outline: none; transition: border-color 0.1s;
+    appearance: none; -webkit-appearance: none;
+  }
+  .form-select:focus, .form-input:focus { border-color: #4f46e5; }
+  .form-select { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2371717a' d='M6 8L1 3h10z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 8px center; padding-right: 24px; }
+  .form-input::placeholder { color: #52525b; }
+
+  /* ── Tab ── */
+  .tab-btn {
+    padding: 10px 14px; font-size: 12px; font-weight: 500;
+    color: #52525b; border-bottom: 2px solid transparent;
+    transition: all 0.1s; white-space: nowrap; cursor: pointer; background: none; border-top: none; border-left: none; border-right: none;
+  }
+  .tab-btn:hover { color: #a1a1aa; }
+  .tab-btn.active { color: #e4e4e7; border-bottom-color: #4f46e5; }
+
+  /* ── Stat card ── */
+  .stat-card {
+    background: #111113; border: 1px solid #1f1f23;
+    border-radius: 6px; padding: 16px;
+    position: relative; overflow: hidden;
+  }
+  .stat-card::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+    background: linear-gradient(90deg, transparent, #4f46e530, transparent);
+  }
+
+  /* ── Modal ── */
+  .modal-backdrop {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.7);
+    backdrop-filter: blur(4px);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 50; padding: 16px;
+  }
+  .modal-box {
+    background: #111113; border: 1px solid #27272a;
+    border-radius: 8px; box-shadow: 0 25px 50px rgba(0,0,0,0.5);
+    width: 100%; max-height: 90vh; overflow-y: auto;
+  }
+  .modal-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 20px; border-bottom: 1px solid #1f1f23;
+  }
+  .modal-header h2 { font-size: 14px; font-weight: 600; color: #e4e4e7; }
+  .modal-close { color: #52525b; cursor: pointer; font-size: 18px; line-height: 1; background: none; border: none; }
+  .modal-close:hover { color: #a1a1aa; }
+  .modal-body { padding: 20px; }
+  .modal-footer { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 12px 20px; border-top: 1px solid #1f1f23; }
+
+  /* ── Form fields inside modal ── */
+  .field-label { font-size: 11px; font-weight: 500; color: #71717a; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 5px; display: block; }
+  .field-group { margin-bottom: 12px; }
+  .field-group .form-select, .field-group .form-input { width: 100%; }
+
+  /* ── Log colors ── */
+  .log-ERROR { color: #f87171; }
+  .log-WARN  { color: #fb923c; }
+  .log-INFO  { color: #71717a; }
+
+  /* ── Live log stream ── */
+  #log-stream { max-height: 300px; overflow-y: auto; background: #070709; border: 1px solid #18181b; border-radius: 6px; padding: 12px; font-family: 'JetBrains Mono', monospace; font-size: 11px; line-height: 1.7; }
+
+  /* ── Section container ── */
+  .section-card { background: #111113; border: 1px solid #1f1f23; border-radius: 6px; overflow: hidden; }
+
+  /* ── Pager ── */
+  #plans-pager, #contents-pager, #publish-pager, #skus-pager {
+    display: flex; align-items: center; justify-content: flex-end; gap: 8px;
+    margin-top: 10px; font-size: 11px; color: #52525b;
+  }
+
+  /* ── Prompt card ── */
+  .prompt-card { background: #18181b; border: 1px solid #27272a; border-radius: 6px; padding: 12px; margin-bottom: 10px; }
+  .prompt-card pre { background: #0d0d0f; border: 1px solid #27272a; border-radius: 4px; padding: 10px; font-size: 11px; color: #a1a1aa; white-space: pre-wrap; word-break: break-all; max-height: 200px; overflow-y: auto; font-family: 'JetBrains Mono', monospace; line-height: 1.6; }
+
+  /* ── Toast ── */
+  #toast {
+    position: fixed; bottom: 20px; right: 20px;
+    background: #18181b; border: 1px solid #27272a;
+    color: #e4e4e7; font-size: 12px; padding: 10px 16px;
+    border-radius: 6px; box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    z-index: 100; max-width: 320px;
+    transition: opacity 0.2s; opacity: 1;
+  }
+  #toast.hidden { display: none; }
+
+  /* ── Donut chart canvas ── */
+  .donut-wrap { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); }
+</style>
+</head>
+<body style="background:#09090b; color:#a1a1aa; min-height:100vh;">
+
+<!-- ═══════════════════════════════ HEADER ═══════════════════════════════ -->
+<header style="background:#0d0d0f; border-bottom:1px solid #1f1f23; padding: 0 20px; height: 44px; display: flex; align-items: center; justify-content: space-between; position: sticky; top:0; z-index:40;">
+  <div style="display:flex; align-items:center; gap:10px;">
+    <div style="width:22px; height:22px; background: linear-gradient(135deg,#4f46e5,#7c3aed); border-radius:5px; display:flex; align-items:center; justify-content:center;">
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 9L6 3L10 9" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="6" cy="3" r="1" fill="white"/></svg>
+    </div>
+    <span style="font-size:13px; font-weight:600; color:#e4e4e7; letter-spacing:-0.01em;">AI Content Hub</span>
+    <span style="font-size:11px; color:#27272a; font-weight:300; margin-left:2px;">/ 管理后台</span>
+  </div>
+  <div style="display:flex; align-items:center; gap:10px;">
+    <span id="sync-time" style="font-size:11px; color:#3f3f46; font-family:'JetBrains Mono',monospace;"></span>
+    <button
+      hx-post="/api/v1/sync/pull"
+      hx-swap="none"
+      hx-on::after-request="showToast('同步已触发，后台执行中')"
+      class="btn btn-ghost" style="font-size:11px;">
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M10 6A4 4 0 1 1 6 2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M10 2v4H6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      同步飞书
+    </button>
+  </div>
+</header>
+
+<!-- ═══════════════════════════════ TAB NAV ═══════════════════════════════ -->
+<nav style="background:#0d0d0f; border-bottom:1px solid #1f1f23; padding:0 20px; display:flex; gap:0; position:sticky; top:44px; z-index:39;">
+  <button onclick="switchTab('plans')"    id="tab-plans"    class="tab-btn active">规划任务</button>
+  <button onclick="switchTab('contents')" id="tab-contents" class="tab-btn">内容生成</button>
+  <button onclick="switchTab('publish')"  id="tab-publish"  class="tab-btn">发布管理</button>
+  <button onclick="switchTab('skus')"     id="tab-skus"     class="tab-btn">SKU库</button>
+  <button onclick="switchTab('logs')"     id="tab-logs"     class="tab-btn">任务日志</button>
+</nav>
+
+<!-- ═══════════════════════════════ MAIN ═══════════════════════════════ -->
+<main style="padding:16px 20px; max-width:1400px; margin:0 auto;">
+
+<!-- Stats Cards -->
+<div id="stats-cards" style="display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:16px;">
+
+  <div class="stat-card" style="position:relative;">
+    <div style="font-size:10px; color:#52525b; font-weight:500; text-transform:uppercase; letter-spacing:.06em; margin-bottom:8px;">规划任务</div>
+    <div style="font-size:26px; font-weight:700; color:#e4e4e7; line-height:1; font-family:'JetBrains Mono',monospace;" id="stat-plan-total">—</div>
+    <div style="margin-top:10px; display:flex; flex-wrap:wrap; gap:10px; font-size:11px;">
+      <span style="color:#60a5fa;">执行中 <b id="stat-plan-running">0</b></span>
+      <span style="color:#4ade80;">完成 <b id="stat-plan-done">0</b></span>
+      <span style="color:#f87171;">失败 <b id="stat-plan-failed">0</b></span>
+      <span style="color:#52525b;">今日 <b id="stat-plan-today">0</b></span>
+    </div>
+    <div class="donut-wrap"><canvas id="chart-plans" width="52" height="52"></canvas></div>
+  </div>
+
+  <div class="stat-card" style="position:relative;">
+    <div style="font-size:10px; color:#52525b; font-weight:500; text-transform:uppercase; letter-spacing:.06em; margin-bottom:8px;">内容生成</div>
+    <div style="font-size:26px; font-weight:700; color:#e4e4e7; line-height:1; font-family:'JetBrains Mono',monospace;" id="stat-content-total">—</div>
+    <div style="margin-top:10px; display:flex; flex-wrap:wrap; gap:10px; font-size:11px;">
+      <span style="color:#fb923c;">待审核 <b id="stat-content-review">0</b></span>
+      <span style="color:#4ade80;">已通过 <b id="stat-content-passed">0</b></span>
+      <span style="color:#f87171;">已拒绝 <b id="stat-content-rejected">0</b></span>
+      <span style="color:#52525b;">今日 <b id="stat-content-today">0</b></span>
+    </div>
+    <div class="donut-wrap"><canvas id="chart-contents" width="52" height="52"></canvas></div>
+  </div>
+
+  <div class="stat-card" style="position:relative;">
+    <div style="font-size:10px; color:#52525b; font-weight:500; text-transform:uppercase; letter-spacing:.06em; margin-bottom:8px;">发布管理</div>
+    <div style="font-size:26px; font-weight:700; color:#e4e4e7; line-height:1; font-family:'JetBrains Mono',monospace;" id="stat-pub-total">—</div>
+    <div style="margin-top:10px; display:flex; flex-wrap:wrap; gap:10px; font-size:11px;">
+      <span style="color:#fb923c;">待发布 <b id="stat-pub-pending">0</b></span>
+      <span style="color:#4ade80;">已发布 <b id="stat-pub-done">0</b></span>
+      <span style="color:#f87171;">失败 <b id="stat-pub-failed">0</b></span>
+    </div>
+    <div class="donut-wrap"><canvas id="chart-publish" width="52" height="52"></canvas></div>
+  </div>
+
+  <div class="stat-card" style="position:relative;">
+    <div style="font-size:10px; color:#52525b; font-weight:500; text-transform:uppercase; letter-spacing:.06em; margin-bottom:8px;">系统日志 24h</div>
+    <div style="font-size:26px; font-weight:700; color:#e4e4e7; line-height:1; font-family:'JetBrains Mono',monospace;" id="stat-log-count">—</div>
+    <div style="margin-top:10px; display:flex; flex-wrap:wrap; gap:10px; font-size:11px;">
+      <span style="color:#f87171;">错误 <b id="stat-log-errors">0</b></span>
+      <span style="color:#52525b;">同步 <b id="stat-last-sync">—</b></span>
+    </div>
+    <div class="donut-wrap"><canvas id="chart-logs" width="52" height="52"></canvas></div>
+  </div>
+
+</div>
+
+<!-- ═════════════════════════ PLANS TAB ═════════════════════════ -->
+<section id="tab-content-plans">
+  <div style="display:flex; align-items:center; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
+    <select id="plan-status-filter" onchange="loadPlans()" class="form-select">
+      <option value="">全部状态</option>
+      <option value="待执行">待执行</option>
+      <option value="执行中">执行中</option>
+      <option value="完成">完成</option>
+      <option value="失败">失败</option>
+    </select>
+    <button onclick="loadPlans()" class="btn btn-ghost">
+      <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M10 6A4 4 0 1 1 6 2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M10 2v4H6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      刷新
+    </button>
+    <div style="flex:1;"></div>
+    <button onclick="openCreatePlan()" class="btn btn-primary">
+      <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M6 2v8M2 6h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+      新建任务
+    </button>
+  </div>
+  <div class="section-card">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>规划编号</th>
+          <th>任务名称</th>
+          <th>任务类型</th>
+          <th>执行状态</th>
+          <th>开始时间</th>
+          <th>完成时间</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody id="plans-tbody">
+        <tr><td colspan="7" style="text-align:center; padding:32px; color:#3f3f46;">加载中…</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div id="plans-pager"></div>
+</section>
+
+<!-- ═════════════════════════ CONTENTS TAB ═════════════════════════ -->
+<section id="tab-content-contents" class="hidden">
+  <div style="display:flex; align-items:center; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
+    <input id="content-plan-filter" placeholder="规划编号筛选…" class="form-input" style="width:160px;">
+    <select id="content-gen-filter" class="form-select">
+      <option value="">全部生成状态</option>
+      <option value="生成中">生成中</option>
+      <option value="已生成">已生成</option>
+      <option value="生成失败">生成失败</option>
+    </select>
+    <select id="content-review-filter" class="form-select">
+      <option value="">全部审核状态</option>
+      <option value="待审核">待审核</option>
+      <option value="已通过">已通过</option>
+      <option value="已拒绝">已拒绝</option>
+    </select>
+    <button onclick="loadContents()" class="btn btn-ghost">查询</button>
+  </div>
+  <div class="section-card">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>内容编号</th>
+          <th>平台</th>
+          <th>内容类型</th>
+          <th>标题</th>
+          <th>生成状态</th>
+          <th>审核状态</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody id="contents-tbody">
+        <tr><td colspan="7" style="text-align:center; padding:32px; color:#3f3f46;">请先选择条件查询</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div id="contents-pager"></div>
+</section>
+
+<!-- ═════════════════════════ PUBLISH TAB ═════════════════════════ -->
+<section id="tab-content-publish" class="hidden">
+  <div style="display:flex; align-items:center; gap:8px; margin-bottom:10px;">
+    <select id="publish-status-filter" onchange="loadPublish()" class="form-select">
+      <option value="">全部状态</option>
+      <option value="待发布">待发布</option>
+      <option value="发布中">发布中</option>
+      <option value="已发布">已发布</option>
+      <option value="发布失败">发布失败</option>
+    </select>
+    <button onclick="loadPublish()" class="btn btn-ghost">
+      <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M10 6A4 4 0 1 1 6 2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M10 2v4H6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      刷新
+    </button>
+  </div>
+  <div class="section-card">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>发布编号</th>
+          <th>发布方式</th>
+          <th>状态</th>
+          <th>计划发布</th>
+          <th>实际发布</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody id="publish-tbody">
+        <tr><td colspan="6" style="text-align:center; padding:32px; color:#3f3f46;">加载中…</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div id="publish-pager"></div>
+</section>
+
+<!-- ═════════════════════════ SKU TAB ═════════════════════════ -->
+<section id="tab-content-skus" class="hidden">
+  <div style="display:flex; align-items:center; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
+    <input id="sku-name-filter" placeholder="名称/编号搜索…" class="form-input" style="width:160px;">
+    <select id="sku-category-filter" class="form-select">
+      <option value="">全部品类</option>
+      <option value="手机壳">手机壳</option>
+      <option value="手机挂架">手机挂架</option>
+      <option value="手机链">手机链</option>
+      <option value="其他">其他</option>
+    </select>
+    <select id="sku-status-filter" class="form-select">
+      <option value="">全部上架状态</option>
+      <option value="已上架">已上架</option>
+      <option value="待上架">待上架</option>
+      <option value="下架">下架</option>
+    </select>
+    <button onclick="loadSkus()" class="btn btn-ghost">查询</button>
+  </div>
+  <div class="section-card">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>SKU编号</th>
+          <th>SKU名称</th>
+          <th>品类</th>
+          <th>上架状态</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody id="skus-tbody">
+        <tr><td colspan="5" style="text-align:center; padding:32px; color:#3f3f46;">请查询</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div id="skus-pager"></div>
+</section>
+
+<!-- ═════════════════════════ LOGS TAB ═════════════════════════ -->
+<section id="tab-content-logs" class="hidden">
+  <div style="display:flex; align-items:center; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
+    <select id="log-entity-filter" class="form-select">
+      <option value="">全部类型</option>
+      <option value="plan">plan</option>
+      <option value="content">content</option>
+      <option value="publish">publish</option>
+      <option value="material">material</option>
+    </select>
+    <select id="log-level-filter" class="form-select">
+      <option value="">全部级别</option>
+      <option value="ERROR">ERROR</option>
+      <option value="WARN">WARN</option>
+      <option value="INFO">INFO</option>
+    </select>
+    <input id="log-code-filter" placeholder="编号筛选…" class="form-input" style="width:140px;">
+    <button onclick="loadLogs()" class="btn btn-ghost">查询</button>
+    <label style="display:flex; align-items:center; gap:6px; font-size:11px; color:#71717a; cursor:pointer; margin-left:8px;">
+      <input type="checkbox" id="log-live" onchange="toggleLiveLog(this.checked)" style="accent-color:#4f46e5;">
+      实时推送
+    </label>
+  </div>
+  <div class="section-card" style="margin-bottom:10px;">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th style="width:130px;">时间</th>
+          <th style="width:60px;">级别</th>
+          <th style="width:70px;">类型</th>
+          <th style="width:140px;">编号</th>
+          <th>消息</th>
+        </tr>
+      </thead>
+      <tbody id="logs-tbody" style="font-family:'JetBrains Mono',monospace; font-size:11px;">
+        <tr><td colspan="5" style="text-align:center; padding:32px; color:#3f3f46;">请查询日志</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div id="live-log-container" class="hidden">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
+      <span style="font-size:11px; font-weight:500; color:#71717a; text-transform:uppercase; letter-spacing:.05em;">实时日志流</span>
+      <button onclick="clearLiveLog()" class="btn btn-ghost" style="font-size:11px; padding:2px 8px;">清空</button>
+    </div>
+    <div id="log-stream"></div>
+  </div>
+</section>
+
+</main>
+
+<!-- ═══════════════════════════════ TOAST ═══════════════════════════════ -->
+<div id="toast" class="hidden"></div>
+
+<!-- ═══════════════════════════════ MODALS ═══════════════════════════════ -->
+
+<!-- Modal: 新建任务 -->
+<div id="modal-create-plan" class="hidden modal-backdrop">
+  <div class="modal-box" style="max-width:480px;">
+    <div class="modal-header">
+      <h2>新建内容生成任务</h2>
+      <button onclick="closeModal('modal-create-plan')" class="modal-close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <form id="create-plan-form" onsubmit="submitCreatePlan(event)">
+        <div class="field-group">
+          <label class="field-label">关联SKU <span style="color:#f87171;">*</span></label>
+          <select id="cp-sku-id" required class="form-select" style="width:100%;">
+            <option value="">加载中…</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label class="field-label">任务类型 <span style="color:#f87171;">*</span></label>
+          <select id="cp-task-type" required class="form-select" style="width:100%;">
+            <option value="AI全创作">AI全创作</option>
+            <option value="图片实拍+AI文案">图片实拍+AI文案</option>
+            <option value="视频实拍+AI文案">视频实拍+AI文案</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label class="field-label">目标平台</label>
+          <div style="display:flex; gap:16px; margin-top:4px;">
+            <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:12px; color:#a1a1aa;">
+              <input type="checkbox" name="platform" value="得物" checked style="accent-color:#4f46e5;"> 得物
+            </label>
+            <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:12px; color:#a1a1aa;">
+              <input type="checkbox" name="platform" value="小红书" style="accent-color:#4f46e5;"> 小红书
+            </label>
+          </div>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+          <div class="field-group">
+            <label class="field-label">图文篇数</label>
+            <input id="cp-img-count" type="number" value="3" min="0" max="10" class="form-input" style="width:100%;">
+          </div>
+          <div class="field-group">
+            <label class="field-label">每篇图片数</label>
+            <input id="cp-img-per-post" type="number" value="4" min="1" max="9" class="form-input" style="width:100%;">
+          </div>
+        </div>
+        <div class="field-group">
+          <label class="field-label">视频篇数</label>
+          <input id="cp-video-count" type="number" value="0" min="0" max="5" class="form-input" style="width:100%;">
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+          <div class="field-group">
+            <label class="field-label">文案模型</label>
+            <select id="cp-text-model" class="form-select" style="width:100%;">
+              <option value="kimi-k2.5">Kimi K2.5</option>
+              <option value="deepseek">DeepSeek</option>
+              <option value="gpt-5.4">GPT-5.4</option>
+              <option value="gpt-4.1">GPT-4.1</option>
+            </select>
+          </div>
+          <div class="field-group">
+            <label class="field-label">图片模型</label>
+            <select id="cp-image-model" class="form-select" style="width:100%;">
+              <option value="volcengine-seedream">volcengine-seedream</option>
+              <option value="nanobanana-2">Nanobanana 2</option>
+            </select>
+          </div>
+        </div>
+        <div class="field-group">
+          <label class="field-label">备注</label>
+          <textarea id="cp-notes" rows="2" class="form-input" style="width:100%; resize:vertical;"></textarea>
+        </div>
+      </form>
+    </div>
+    <div class="modal-footer">
+      <span id="create-plan-status" style="font-size:11px; color:#f87171; flex:1;"></span>
+      <button type="button" onclick="closeModal('modal-create-plan')" class="btn btn-ghost">取消</button>
+      <button type="submit" form="create-plan-form" id="create-plan-submit" class="btn btn-primary">提交任务</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: 提示词查看 -->
+<div id="modal-prompts" class="hidden modal-backdrop">
+  <div class="modal-box" style="max-width:640px;">
+    <div class="modal-header">
+      <h2>提示词 — <span id="prompt-plan-code" style="font-family:'JetBrains Mono',monospace; color:#818cf8; font-size:13px;"></span></h2>
+      <button onclick="closeModal('modal-prompts')" class="modal-close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div id="prompts-content"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: 图片预览 -->
+<div id="modal-preview" class="hidden modal-backdrop" style="background:rgba(0,0,0,0.85);">
+  <div class="modal-box" style="max-width:860px; background:#0d0d0f;">
+    <div class="modal-header">
+      <h2>内容预览</h2>
+      <button onclick="closeModal('modal-preview')" class="modal-close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div id="preview-text" style="margin-bottom:12px; font-size:12px; color:#a1a1aa; border-bottom:1px solid #1f1f23; padding-bottom:12px;"></div>
+      <div id="preview-images" style="display:grid; grid-template-columns:repeat(3,1fr); gap:8px; max-height:60vh; overflow-y:auto;"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: SKU详情 -->
+<div id="modal-sku" class="hidden modal-backdrop">
+  <div class="modal-box" style="max-width:480px;">
+    <div class="modal-header">
+      <h2>SKU详情</h2>
+      <button onclick="closeModal('modal-sku')" class="modal-close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div id="sku-detail-content"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: 触发发布 -->
+<div id="modal-execute-publish" class="hidden modal-backdrop">
+  <div class="modal-box" style="max-width:360px;">
+    <div class="modal-header">
+      <h2>触发发布 — <span id="exec-pub-code" style="font-family:'JetBrains Mono',monospace; color:#818cf8; font-size:13px;"></span></h2>
+      <button onclick="closeModal('modal-execute-publish')" class="modal-close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="field-group">
+        <label class="field-label">发布方式</label>
+        <select id="exec-pub-method" class="form-select" style="width:100%;">
+          <option value="得物自动发布">得物自动发布</option>
+          <option value="小红书手动">小红书手动</option>
+          <option value="立即发布">立即发布</option>
+        </select>
+      </div>
+      <div id="exec-pub-status" style="font-size:11px; color:#f87171;"></div>
+    </div>
+    <div class="modal-footer">
+      <button onclick="closeModal('modal-execute-publish')" class="btn btn-ghost">取消</button>
+      <button onclick="submitExecutePublish()" id="exec-pub-submit" class="btn btn-primary">确认发布</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: 素材迁移 -->
+<div id="modal-migrate" class="hidden modal-backdrop">
+  <div class="modal-box" style="max-width:440px;">
+    <div class="modal-header">
+      <h2>素材迁移 — <span id="migrate-content-code" style="font-family:'JetBrains Mono',monospace; color:#818cf8; font-size:13px;"></span></h2>
+      <button onclick="closeModal('modal-migrate')" class="modal-close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="field-group">
+        <label class="field-label">素材源文件夹路径（绝对路径）</label>
+        <input id="migrate-source-folder" type="text" placeholder="D:\素材\2604\xxx" class="form-input" style="width:100%; font-family:'JetBrains Mono',monospace; font-size:11px;">
+      </div>
+      <div id="migrate-status" style="font-size:11px; color:#f87171;"></div>
+    </div>
+    <div class="modal-footer">
+      <button onclick="closeModal('modal-migrate')" class="btn btn-ghost">取消</button>
+      <button onclick="submitMigrate()" id="migrate-submit" class="btn btn-warn">开始迁移</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Chart.js donut charts ──────────────────────────────────────────────────
+
+const CHART_DEFAULTS = {
+  type: 'doughnut',
+  options: {
+    responsive: false,
+    cutout: '72%',
+    plugins: { legend: { display: false }, tooltip: { enabled: false } },
+    animation: { duration: 600, easing: 'easeInOutQuart' },
+  }
+};
+
+function makeDonut(id, colors, data) {
+  const ctx = document.getElementById(id);
+  if (!ctx) return null;
+  return new Chart(ctx, {
+    ...CHART_DEFAULTS,
+    data: {
+      datasets: [{
+        data,
+        backgroundColor: colors,
+        borderWidth: 0,
+        hoverOffset: 0,
+      }]
+    }
+  });
+}
+
+// Placeholder donuts (show ring until data loads)
+const charts = {
+  plans:   makeDonut('chart-plans',   ['#3b82f6','#4ade80','#f87171','#27272a'], [1,0,0,3]),
+  contents:makeDonut('chart-contents',['#fb923c','#4ade80','#f87171','#27272a'], [1,0,0,3]),
+  publish: makeDonut('chart-publish', ['#fb923c','#4ade80','#f87171','#27272a'], [1,0,0,3]),
+  logs:    makeDonut('chart-logs',    ['#f87171','#27272a'], [0,1]),
+};
+
+function updateDonut(chart, data) {
+  if (!chart) return;
+  chart.data.datasets[0].data = data;
+  chart.update('active');
+}
+
+// ── Utilities ──────────────────────────────────────────────────────────────
+
+function showToast(msg, duration = 3000) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.remove('hidden');
+  clearTimeout(el._timer);
+  el._timer = setTimeout(() => el.classList.add('hidden'), duration);
+}
+
+function badge(status) {
+  return `<span class="badge badge-${status}">${status}</span>`;
+}
+
+function fmtDt(dt) {
+  if (!dt) return '—';
+  return new Date(dt).toLocaleString('zh-CN', {
+    month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit'
+  });
+}
+
+function escHtml(s) {
+  return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Tab switching ──────────────────────────────────────────────────────────
+
+let currentTab = 'plans';
+function switchTab(name) {
+  document.querySelectorAll('[id^="tab-content-"]').forEach(el => el.classList.add('hidden'));
+  document.getElementById('tab-content-' + name).classList.remove('hidden');
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  currentTab = name;
+  if (name === 'plans')    loadPlans();
+  if (name === 'contents') loadContents();
+  if (name === 'publish')  loadPublish();
+  if (name === 'skus')     loadSkus();
+  if (name === 'logs')     loadLogs();
+}
+
+// ── Modal helpers ──────────────────────────────────────────────────────────
+
+function openModal(id)  { document.getElementById(id).classList.remove('hidden'); }
+function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
+
+// ── Plans ──────────────────────────────────────────────────────────────────
+
+let plansPage = 1;
+async function loadPlans(page = 1) {
+  plansPage = page;
+  const status = document.getElementById('plan-status-filter').value;
+  const params = new URLSearchParams({ page, limit: 50 });
+  if (status) params.set('status', status);
+  const res = await fetch('/api/v1/plans?' + params);
+  const data = await res.json();
+  const tbody = document.getElementById('plans-tbody');
+  if (!data.items.length) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:32px;color:#3f3f46;">暂无数据</td></tr>';
+    return;
+  }
+  tbody.innerHTML = data.items.map(p => `
+    <tr>
+      <td class="mono">${p.plan_code}</td>
+      <td class="primary">${p.task_name || '—'}</td>
+      <td>${p.task_type || '—'}</td>
+      <td>${badge(p.exec_status)}</td>
+      <td class="muted">${fmtDt(p.started_at)}</td>
+      <td class="muted">${fmtDt(p.finished_at)}</td>
+      <td style="white-space:nowrap;">
+        ${p.exec_status === '失败' ? `<button onclick="retryPlan('${p.plan_code}')" class="btn btn-warn" style="margin-right:4px;">重试</button>` : ''}
+        <button onclick="loadPrompts('${p.plan_code}')" class="btn btn-purple" style="margin-right:4px;">提示词</button>
+        <button onclick="viewPlanLogs('${p.plan_code}')" class="btn btn-ghost">日志</button>
+      </td>
+    </tr>
+  `).join('');
+  renderPager('plans', data.total, page, 50, loadPlans);
+}
+
+async function retryPlan(plan_code) {
+  const res = await fetch(`/api/v1/plans/${plan_code}/retry`, { method: 'POST' });
+  const d = await res.json();
+  showToast(d.ok ? `已重置 ${plan_code} 为待执行` : `重置失败: ${JSON.stringify(d)}`);
+  loadPlans(plansPage);
+}
+
+async function viewPlanLogs(plan_code) {
+  switchTab('logs');
+  document.getElementById('log-code-filter').value = plan_code;
+  loadLogs();
+}
+
+// ── Contents ───────────────────────────────────────────────────────────────
+
+let contentsPage = 1;
+async function loadContents(page = 1) {
+  contentsPage = page;
+  const planCode   = document.getElementById('content-plan-filter').value.trim();
+  const genStatus  = document.getElementById('content-gen-filter').value;
+  const reviewStatus = document.getElementById('content-review-filter').value;
+  const params = new URLSearchParams({ page, limit: 50 });
+  if (planCode)     params.set('plan_code', planCode);
+  if (genStatus)    params.set('gen_status', genStatus);
+  if (reviewStatus) params.set('review_status', reviewStatus);
+  const res = await fetch('/api/v1/contents?' + params);
+  const data = await res.json();
+  const tbody = document.getElementById('contents-tbody');
+  if (!data.items.length) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:32px;color:#3f3f46;">暂无数据</td></tr>';
+    return;
+  }
+  tbody.innerHTML = data.items.map(c => `
+    <tr>
+      <td class="mono">${c.content_code}</td>
+      <td>${c.target_platform || '—'}</td>
+      <td>${c.content_type || '—'}</td>
+      <td class="primary" style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escHtml(c.title || '')}">${c.title || '—'}</td>
+      <td>${badge(c.gen_status || '—')}</td>
+      <td>${badge(c.review_status || '—')}</td>
+      <td style="white-space:nowrap; display:flex; gap:4px; flex-wrap:wrap;">
+        ${c.review_status === '待审核' ? `
+          <button onclick="reviewContent('${c.content_code}','approve')" class="btn btn-success">通过</button>
+          <button onclick="reviewContent('${c.content_code}','reject')" class="btn btn-danger">拒绝</button>
+        ` : ''}
+        ${c.local_dir ? `<button onclick="previewContent('${c.content_code}')" class="btn btn-ghost">预览</button>` : ''}
+        ${c.migrate_status !== '已完成' ? `<button onclick="openMigrate('${c.content_code}')" class="btn btn-warn">迁移素材</button>` : ''}
+      </td>
+    </tr>
+  `).join('');
+  renderPager('contents', data.total, page, 50, loadContents);
+}
+
+async function reviewContent(content_code, action) {
+  const res = await fetch(`/api/v1/contents/${content_code}/review`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ action }),
+  });
+  const d = await res.json();
+  showToast(d.ok ? `${content_code} 已${action === 'approve' ? '通过' : '拒绝'}` : '操作失败');
+  loadContents(contentsPage);
+}
+
+// ── Publish ────────────────────────────────────────────────────────────────
+
+let publishPage = 1;
+async function loadPublish(page = 1) {
+  publishPage = page;
+  const status = document.getElementById('publish-status-filter').value;
+  const params = new URLSearchParams({ page, limit: 50 });
+  if (status) params.set('status', status);
+  const res = await fetch('/api/v1/publish?' + params);
+  const data = await res.json();
+  const tbody = document.getElementById('publish-tbody');
+  if (!data.items.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:32px;color:#3f3f46;">暂无数据</td></tr>';
+    return;
+  }
+  tbody.innerHTML = data.items.map(p => `
+    <tr>
+      <td class="mono">${p.pub_code}</td>
+      <td>${p.publish_method || '—'}</td>
+      <td>${badge(p.pub_status || '—')}</td>
+      <td class="muted">${fmtDt(p.scheduled_at)}</td>
+      <td class="muted">${fmtDt(p.published_at)}</td>
+      <td style="white-space:nowrap;">
+        ${p.pub_status === '发布失败' ? `<button onclick="retryPublish('${p.pub_code}')" class="btn btn-warn">重试</button>` : ''}
+        ${p.pub_status === '待发布' ? `<button onclick="openExecutePublish('${p.pub_code}')" class="btn btn-primary">发布</button>` : ''}
+      </td>
+    </tr>
+  `).join('');
+  renderPager('publish', data.total, page, 50, loadPublish);
+}
+
+async function retryPublish(pub_code) {
+  const res = await fetch(`/api/v1/publish/${pub_code}/retry`, { method: 'POST' });
+  const d = await res.json();
+  showToast(d.ok ? `已重置 ${pub_code} 为待发布` : '重置失败');
+  loadPublish(publishPage);
+}
+
+// ── Logs ───────────────────────────────────────────────────────────────────
+
+let logsPage = 1;
+async function loadLogs(page = 1) {
+  logsPage = page;
+  const entityType = document.getElementById('log-entity-filter').value;
+  const level = document.getElementById('log-level-filter').value;
+  const code  = document.getElementById('log-code-filter').value.trim();
+  const params = new URLSearchParams({ page, limit: 100 });
+  if (entityType) params.set('entity_type', entityType);
+  if (level)      params.set('level', level);
+  if (code)       params.set('entity_code', code);
+  const res = await fetch('/api/v1/logs?' + params);
+  const data = await res.json();
+  const tbody = document.getElementById('logs-tbody');
+  if (!data.items.length) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:32px;color:#3f3f46;">暂无日志</td></tr>';
+    return;
+  }
+  tbody.innerHTML = data.items.map(l => `
+    <tr class="log-${l.level}">
+      <td>${fmtDt(l.created_at)}</td>
+      <td style="font-weight:600;">${l.level}</td>
+      <td>${l.entity_type}</td>
+      <td>${l.entity_code || '—'}</td>
+      <td>${escHtml(l.message)}</td>
+    </tr>
+  `).join('');
+}
+
+// ── Live log stream ────────────────────────────────────────────────────────
+
+let _sse = null;
+function toggleLiveLog(enabled) {
+  document.getElementById('live-log-container').classList.toggle('hidden', !enabled);
+  if (enabled) {
+    _sse = new EventSource('/api/v1/logs/stream');
+    _sse.onmessage = (e) => {
+      const log = JSON.parse(e.data);
+      const container = document.getElementById('log-stream');
+      const line = document.createElement('div');
+      line.className = `log-${log.level}`;
+      line.textContent = `[${fmtDt(log.created_at)}] ${log.level} [${log.entity_type}] ${log.entity_code || ''} ${log.message}`;
+      container.appendChild(line);
+      container.scrollTop = container.scrollHeight;
+    };
+  } else if (_sse) {
+    _sse.close();
+    _sse = null;
+  }
+}
+
+function clearLiveLog() {
+  document.getElementById('log-stream').innerHTML = '';
+}
+
+// ── Pager ──────────────────────────────────────────────────────────────────
+
+function renderPager(id, total, page, limit, loadFn) {
+  const totalPages = Math.ceil(total / limit);
+  const el = document.getElementById(id + '-pager');
+  if (totalPages <= 1) { el.innerHTML = `<span>共 ${total} 条</span>`; return; }
+  let html = `<span>共 ${total} 条</span>`;
+  if (page > 1)          html += `<button onclick="${loadFn.name}(${page-1})" class="btn btn-ghost" style="padding:3px 8px;">&larr;</button>`;
+  html += `<span style="color:#e4e4e7;">${page}<span style="color:#3f3f46;"> / ${totalPages}</span></span>`;
+  if (page < totalPages) html += `<button onclick="${loadFn.name}(${page+1})" class="btn btn-ghost" style="padding:3px 8px;">&rarr;</button>`;
+  el.innerHTML = html;
+}
+
+// ── Sync status ────────────────────────────────────────────────────────────
+
+async function loadSyncStatus() {
+  try {
+    const res = await fetch('/api/v1/sync/status');
+    const cursors = await res.json();
+    if (cursors.length) {
+      const latest = cursors.reduce((a, b) =>
+        (a.last_sync_at || '') > (b.last_sync_at || '') ? a : b
+      );
+      document.getElementById('sync-time').textContent = '↻ ' + fmtDt(latest.last_sync_at);
+    }
+  } catch(e) {}
+}
+
+// ── Stats cards ───────────────────────────────────────────────────────────
+
+async function loadStats() {
+  try {
+    const d = await fetch('/api/v1/stats').then(r => r.json());
+
+    document.getElementById('stat-plan-total').textContent    = d.plans.total;
+    document.getElementById('stat-plan-running').textContent  = d.plans['执行中'];
+    document.getElementById('stat-plan-done').textContent     = d.plans['完成'];
+    document.getElementById('stat-plan-failed').textContent   = d.plans['失败'];
+    document.getElementById('stat-plan-today').textContent    = d.plans.today;
+
+    document.getElementById('stat-content-total').textContent    = d.contents.total;
+    document.getElementById('stat-content-review').textContent   = d.contents['待审核'];
+    document.getElementById('stat-content-passed').textContent   = d.contents['已通过'];
+    document.getElementById('stat-content-rejected').textContent = d.contents['已拒绝'];
+    document.getElementById('stat-content-today').textContent    = d.contents.today;
+
+    document.getElementById('stat-pub-total').textContent    = d.publish.total;
+    document.getElementById('stat-pub-pending').textContent  = d.publish['待发布'];
+    document.getElementById('stat-pub-done').textContent     = d.publish['已发布'];
+    document.getElementById('stat-pub-failed').textContent   = d.publish['发布失败'];
+
+    document.getElementById('stat-log-count').textContent  = d.logs.count_24h;
+    document.getElementById('stat-log-errors').textContent = d.logs.errors_24h;
+    document.getElementById('stat-last-sync').textContent  = d.last_sync_at || '—';
+
+    // Update donuts
+    const pTotal = d.plans.total || 1;
+    updateDonut(charts.plans, [
+      d.plans['执行中'] || 0,
+      d.plans['完成']   || 0,
+      d.plans['失败']   || 0,
+      Math.max(0, (d.plans['待执行'] || 0)),
+    ]);
+    updateDonut(charts.contents, [
+      d.contents['待审核']  || 0,
+      d.contents['已通过']  || 0,
+      d.contents['已拒绝']  || 0,
+      Math.max(0, d.contents.total - (d.contents['待审核']||0) - (d.contents['已通过']||0) - (d.contents['已拒绝']||0)),
+    ]);
+    updateDonut(charts.publish, [
+      d.publish['待发布']   || 0,
+      d.publish['已发布']   || 0,
+      d.publish['发布失败'] || 0,
+      Math.max(0, d.publish.total - (d.publish['待发布']||0) - (d.publish['已发布']||0) - (d.publish['发布失败']||0)),
+    ]);
+    const errs = d.logs.errors_24h || 0;
+    const norm = Math.max(0, (d.logs.count_24h || 0) - errs);
+    updateDonut(charts.logs, [errs || 0, norm || 1]);
+
+  } catch(e) { console.warn('stats load failed', e); }
+}
+
+// ── SKUs ───────────────────────────────────────────────────────────────────
+
+let skusPage = 1;
+async function loadSkus(page = 1) {
+  skusPage = page;
+  const name     = document.getElementById('sku-name-filter').value.trim();
+  const category = document.getElementById('sku-category-filter').value;
+  const status   = document.getElementById('sku-status-filter').value;
+  const params   = new URLSearchParams({ page, limit: 50 });
+  if (name)     params.set('name', name);
+  if (category) params.set('category', category);
+  if (status)   params.set('listing_status', status);
+  const res  = await fetch('/api/v1/skus?' + params);
+  const data = await res.json();
+  const tbody = document.getElementById('skus-tbody');
+  if (!data.items.length) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:32px;color:#3f3f46;">暂无数据</td></tr>';
+    return;
+  }
+  tbody.innerHTML = data.items.map(sk => `
+    <tr>
+      <td class="mono">${sk.sku_code}</td>
+      <td class="primary">${sk.sku_name}</td>
+      <td>${sk.category || '—'}</td>
+      <td>${badge(sk.listing_status || '—')}</td>
+      <td><button onclick="viewSkuDetail(${sk.id})" class="btn btn-ghost">详情</button></td>
+    </tr>
+  `).join('');
+  renderPager('skus', data.total, page, 50, loadSkus);
+}
+
+async function viewSkuDetail(sku_id) {
+  const res = await fetch(`/api/v1/skus/${sku_id}`);
+  if (!res.ok) { showToast('加载SKU详情失败'); return; }
+  const sk = await res.json();
+  const fields = [
+    ['SKU编号', sk.sku_code], ['SKU名称', sk.sku_name], ['产品简称', sk.product_alias],
+    ['平台展示名', sk.display_name], ['品类', sk.category], ['适配机型', sk.model],
+    ['材质', sk.material], ['颜色', sk.color], ['风格', sk.style],
+    ['目标人群', sk.target_audience], ['卖点1', sk.selling_point_1],
+    ['卖点2', sk.selling_point_2], ['卖点3', sk.selling_point_3],
+    ['价格区间', sk.price_range], ['平台', sk.platforms], ['上架状态', sk.listing_status],
+  ];
+  document.getElementById('sku-detail-content').innerHTML = fields
+    .filter(([, v]) => v != null)
+    .map(([k, v]) => `
+      <div style="display:flex; gap:8px; padding:6px 0; border-bottom:1px solid #18181b; font-size:12px;">
+        <span style="color:#52525b; width:90px; flex-shrink:0;">${k}</span>
+        <span style="color:#e4e4e7;">${escHtml(String(v))}</span>
+      </div>
+    `).join('');
+  openModal('modal-sku');
+}
+
+// ── Prompts ────────────────────────────────────────────────────────────────
+
+async function loadPrompts(plan_code) {
+  document.getElementById('prompt-plan-code').textContent = plan_code;
+  document.getElementById('prompts-content').innerHTML = '<div style="color:#3f3f46;font-size:12px;">加载中…</div>';
+  openModal('modal-prompts');
+  const res = await fetch(`/api/v1/plans/${plan_code}/prompts`);
+  if (!res.ok) {
+    document.getElementById('prompts-content').innerHTML = '<div style="color:#f87171;font-size:12px;">加载失败</div>';
+    return;
+  }
+  const prompts = await res.json();
+  if (!prompts.length) {
+    document.getElementById('prompts-content').innerHTML = '<div style="color:#3f3f46;font-size:12px;">暂无提示词记录（未同步或任务未完成）</div>';
+    return;
+  }
+  document.getElementById('prompts-content').innerHTML = prompts.map(p => `
+    <div class="prompt-card">
+      <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px; flex-wrap:wrap;">
+        <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#818cf8;">${escHtml(p.prompt_code)}</span>
+        <span class="badge" style="background:#1f1f23; color:#71717a;">${escHtml(p.prompt_type || '—')}</span>
+        ${p.group_id ? `<span style="font-size:11px; color:#52525b;">group: ${escHtml(p.group_id)}</span>` : ''}
+        ${p.status ? `<span class="badge" style="background:#1e3a5f; color:#60a5fa;">${escHtml(p.status)}</span>` : ''}
+      </div>
+      ${p.master_prompt ? `
+        <div style="font-size:11px; color:#52525b; margin-bottom:4px;">总 Prompt</div>
+        <pre>${escHtml(p.master_prompt)}</pre>
+      ` : ''}
+      ${p.sub_prompts && p.sub_prompts !== '[]' ? `
+        <div style="font-size:11px; color:#52525b; margin-top:8px; margin-bottom:4px;">子 Prompt 列表</div>
+        <pre>${escHtml(p.sub_prompts)}</pre>
+      ` : ''}
+    </div>
+  `).join('');
+}
+
+// ── Image Preview ──────────────────────────────────────────────────────────
+
+async function previewContent(content_code) {
+  document.getElementById('preview-text').innerHTML = '<span style="color:#3f3f46;">加载中…</span>';
+  document.getElementById('preview-images').innerHTML = '';
+  openModal('modal-preview');
+  const res = await fetch(`/api/v1/contents/${content_code}/preview?max_images=9`);
+  if (!res.ok) {
+    document.getElementById('preview-text').innerHTML = '<span style="color:#f87171;">加载失败</span>';
+    return;
+  }
+  const d = await res.json();
+  document.getElementById('preview-text').innerHTML = `
+    ${d.title ? `<div style="font-weight:600; color:#e4e4e7; margin-bottom:4px;">${escHtml(d.title)}</div>` : ''}
+    ${d.body   ? `<div style="font-size:11px; color:#71717a; white-space:pre-wrap; max-height:80px; overflow-y:auto;">${escHtml(d.body)}</div>` : ''}
+    ${d.dir_missing ? '<div style="color:#fb923c;font-size:11px;margin-top:4px;">本地文件夹不存在</div>' : ''}
+  `;
+  if (!d.images || !d.images.length) {
+    document.getElementById('preview-images').innerHTML = '<div style="color:#3f3f46;text-align:center;padding:32px;grid-column:span 3;">无图片文件</div>';
+    return;
+  }
+  document.getElementById('preview-images').innerHTML = d.images.map(img =>
+    img.skipped
+      ? `<div style="display:flex;align-items:center;justify-content:center;background:#1f1f23;border-radius:4px;font-size:11px;color:#52525b;padding:16px;text-align:center;">${escHtml(img.name)}<br>（过大，已跳过）</div>`
+      : `<img src="${img.data_url}" alt="${escHtml(img.name)}" style="border-radius:4px;border:1px solid #27272a;object-fit:cover;width:100%;height:160px;" title="${escHtml(img.name)}">`
+  ).join('');
+}
+
+// ── Create Plan ────────────────────────────────────────────────────────────
+
+async function openCreatePlan() {
+  const skuSel = document.getElementById('cp-sku-id');
+  skuSel.innerHTML = '<option value="">加载中…</option>';
+  try {
+    const res = await fetch('/api/v1/skus?listing_status=已上架&limit=200');
+    const data = await res.json();
+    skuSel.innerHTML = '<option value="">请选择SKU</option>' +
+      data.items.map(sk => `<option value="${sk.id}">${escHtml(sk.sku_code)} — ${escHtml(sk.sku_name)}</option>`).join('');
+  } catch(e) {
+    skuSel.innerHTML = '<option value="">加载失败，请重试</option>';
+  }
+  document.getElementById('create-plan-status').textContent = '';
+  document.getElementById('create-plan-submit').disabled = false;
+  openModal('modal-create-plan');
+}
+
+async function submitCreatePlan(evt) {
+  evt.preventDefault();
+  const btn      = document.getElementById('create-plan-submit');
+  const statusEl = document.getElementById('create-plan-status');
+  btn.disabled   = true;
+  statusEl.textContent = '提交中…';
+
+  const platforms = [...document.querySelectorAll('input[name="platform"]:checked')].map(el => el.value);
+  if (!platforms.length) { statusEl.textContent = '请至少选择一个平台'; btn.disabled = false; return; }
+
+  const body = {
+    sku_id:           parseInt(document.getElementById('cp-sku-id').value),
+    task_type:        document.getElementById('cp-task-type').value,
+    target_platforms: platforms,
+    img_count:        parseInt(document.getElementById('cp-img-count').value),
+    img_per_post:     parseInt(document.getElementById('cp-img-per-post').value),
+    video_count:      parseInt(document.getElementById('cp-video-count').value),
+    text_model:       document.getElementById('cp-text-model').value,
+    image_model:      document.getElementById('cp-image-model').value,
+    notes:            document.getElementById('cp-notes').value,
+  };
+
+  try {
+    const res = await fetch('/api/v1/plans/create', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    const d = await res.json();
+    if (res.ok && d.ok) {
+      closeModal('modal-create-plan');
+      showToast(`任务 ${d.plan_code} 已提交`, 5000);
+      loadPlans();
+      loadStats();
+    } else {
+      statusEl.textContent = d.detail || JSON.stringify(d);
+      btn.disabled = false;
+    }
+  } catch(e) {
+    statusEl.textContent = '网络错误: ' + e.message;
+    btn.disabled = false;
+  }
+}
+
+// ── Execute Publish ────────────────────────────────────────────────────────
+
+let _execPubCode = null;
+function openExecutePublish(pub_code) {
+  _execPubCode = pub_code;
+  document.getElementById('exec-pub-code').textContent = pub_code;
+  document.getElementById('exec-pub-status').textContent = '';
+  document.getElementById('exec-pub-submit').disabled = false;
+  openModal('modal-execute-publish');
+}
+
+async function submitExecutePublish() {
+  if (!_execPubCode) return;
+  const btn      = document.getElementById('exec-pub-submit');
+  const statusEl = document.getElementById('exec-pub-status');
+  btn.disabled   = true;
+  statusEl.textContent = '提交中…';
+  const method = document.getElementById('exec-pub-method').value;
+  try {
+    const res = await fetch(`/api/v1/publish/${_execPubCode}/execute`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ publish_method: method }),
+    });
+    const d = await res.json();
+    if (res.ok && d.ok) {
+      closeModal('modal-execute-publish');
+      showToast(`${_execPubCode} 发布已触发（${method}）`, 5000);
+      loadPublish(publishPage);
+      loadStats();
+    } else {
+      statusEl.textContent = d.detail || JSON.stringify(d);
+      btn.disabled = false;
+    }
+  } catch(e) {
+    statusEl.textContent = '网络错误: ' + e.message;
+    btn.disabled = false;
+  }
+}
+
+// ── Material Migrate ───────────────────────────────────────────────────────
+
+let _migrateCode = null;
+function openMigrate(content_code) {
+  _migrateCode = content_code;
+  document.getElementById('migrate-content-code').textContent = content_code;
+  document.getElementById('migrate-source-folder').value = '';
+  document.getElementById('migrate-status').textContent = '';
+  document.getElementById('migrate-submit').disabled = false;
+  openModal('modal-migrate');
+}
+
+async function submitMigrate() {
+  if (!_migrateCode) return;
+  const btn      = document.getElementById('migrate-submit');
+  const statusEl = document.getElementById('migrate-status');
+  const folder   = document.getElementById('migrate-source-folder').value.trim();
+  if (!folder) { statusEl.textContent = '请输入源文件夹路径'; return; }
+  btn.disabled   = true;
+  statusEl.textContent = '提交中…';
+  try {
+    const res = await fetch(`/api/v1/contents/${_migrateCode}/migrate`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ source_folder: folder }),
+    });
+    const d = await res.json();
+    if (res.ok && d.ok) {
+      closeModal('modal-migrate');
+      showToast(`${_migrateCode} 素材迁移已触发`, 4000);
+      loadContents(contentsPage);
+    } else {
+      statusEl.textContent = d.detail || JSON.stringify(d);
+      btn.disabled = false;
+    }
+  } catch(e) {
+    statusEl.textContent = '网络错误: ' + e.message;
+    btn.disabled = false;
+  }
+}
+
+// ── Init ───────────────────────────────────────────────────────────────────
+loadPlans();
+loadSyncStatus();
+loadStats();
+setInterval(loadSyncStatus, 60000);
+setInterval(loadStats, 30000);
+</script>
+</body>
+</html>

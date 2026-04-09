@@ -568,6 +568,19 @@ class ContentGenerationHandler:
                 "场景描述_中文":   f.get_text(scene, "场景描述_中文"),
                 "风格基调词":      f.get_text(scene, "风格基调词"),
                 "排除描述":        f.get_text(scene, "排除描述"),
+                # Person fields
+                "人物类型":        f.get_text(scene, "人物类型"),
+                "性别倾向":        f.get_text(scene, "性别倾向"),
+                "年龄段":          f.get_text(scene, "年龄段"),
+                "外貌风格":        f.get_text(scene, "外貌风格"),
+                "姿态倾向":        f.get_text(scene, "姿态倾向"),
+                # Technical parameters (single-select fields)
+                "时段光境":        f.get_option(scene, "时段光境"),
+                "空间感":          f.get_option(scene, "空间感"),
+                "光线方向":        f.get_option(scene, "光线方向"),
+                "色温":            f.get_option(scene, "色温"),
+                "景深感":          f.get_option(scene, "景深感"),
+                "镜头感":          f.get_option(scene, "镜头感"),
             }
 
         if self._storage:
@@ -640,10 +653,20 @@ class ContentGenerationHandler:
         "产品场景融合，与背景道具自然搭配构图",
     ]
 
+    # Master prompt target length; sub-prompts target 200 chars each
+    _MASTER_PROMPT_MAX = 600
+    # Technical params that add atmosphere without overwhelming the prompt
+    _TECH_PARAM_KEYS = ("光线方向", "色温", "景深感", "镜头感")
+
     def _build_image_master_prompt(
         self, strategy: dict | None, sku_fields: dict, scene: dict
     ) -> str:
-        """Build the master context prompt in Chinese for image generation."""
+        """Build the master context prompt in Chinese for image generation.
+
+        Length budget: target ≤600 chars so combined (master + sub) stays ≤800.
+        Sections are dropped in priority order if over budget — never hard-truncated:
+          drop order: 【技术参数】 → 【避免】缩短 → 【场景】缩短
+        """
         f = self._feishu
         rec = {"fields": sku_fields}
         colors    = "、".join(f.get_options(rec, "颜色"))
@@ -663,34 +686,74 @@ class ContentGenerationHandler:
         appearance  = scene.get("外貌风格", "").strip()
         posture     = scene.get("姿态倾向", "").strip()
 
+        # Technical parameter fields (single-select, may be empty)
+        tech_params = [
+            scene.get(k, "").strip() for k in self._TECH_PARAM_KEYS if scene.get(k, "").strip()
+        ]
+
         emotion_zh = f.get_option(strategy, "情绪基调") if strategy else ""
         mood_zh    = self._EMOTION_ZH.get(emotion_zh, "自然真实")
 
-        parts = [
+        # --- build core sections (always included) ---
+        core_parts = [
             f"【产品】{product_desc}",
             "",
             f"【场景】{scene_zh}" if scene_zh else "",
             f"风格：{style_words}。情绪：{mood_zh}。" if style_words else f"情绪：{mood_zh}。",
         ]
 
-        # Inject person descriptor only when scene involves a real person
+        person_part: list[str] = []
         if person_type and person_type not in ("无人物",):
             person_attrs = [x for x in [gender, age_range, appearance, posture] if x]
             person_line = person_type
             if person_attrs:
                 person_line += "，" + "，".join(person_attrs)
-            parts += ["", f"【人物】{person_line}"]
+            person_part = ["", f"【人物】{person_line}"]
 
-        parts += [
+        consistency_part = [
             "",
             "【一致性要求】",
             "- 所有图片保持完全相同的产品外观（颜色、材质、细节）",
             "- 同一人物（同一人、同套服装、同款发型）",
             "- 统一光线和色彩风格贯穿始终",
         ]
+
+        # Optional sections, dropped first when over budget
+        exclude_part = ["", f"【避免】{exclude}"] if exclude else []
+        tech_part    = ["", f"【技术参数】{'、'.join(tech_params)}"] if tech_params else []
+
+        def _join(parts_list: list[list[str]]) -> str:
+            merged = []
+            for p in parts_list:
+                merged.extend(p)
+            return "\n".join(x for x in merged if x is not None)
+
+        # Try full prompt first
+        full = _join([core_parts, person_part, tech_part, consistency_part, exclude_part])
+        if len(full) <= self._MASTER_PROMPT_MAX:
+            return full
+
+        # Drop tech params
+        reduced = _join([core_parts, person_part, consistency_part, exclude_part])
+        if len(reduced) <= self._MASTER_PROMPT_MAX:
+            return reduced
+
+        # Trim exclude to first clause (up to first Chinese comma/period)
         if exclude:
-            parts += ["", f"【避免】{exclude}"]
-        return "\n".join(p for p in parts if p is not None)
+            short_excl = exclude.split("，")[0].split("。")[0]
+            reduced = _join([core_parts, person_part, consistency_part, ["", f"【避免】{short_excl}"]])
+            if len(reduced) <= self._MASTER_PROMPT_MAX:
+                return reduced
+
+        # Drop exclude entirely
+        reduced = _join([core_parts, person_part, consistency_part])
+        if len(reduced) <= self._MASTER_PROMPT_MAX:
+            return reduced
+
+        # Last resort: trim scene_zh to ≤60 chars
+        if scene_zh and len(scene_zh) > 60:
+            core_parts[2] = f"【场景】{scene_zh[:60]}"
+        return _join([core_parts, person_part, consistency_part])
 
     def _build_image_sub_prompts(
         self, shotplan: dict | None, scene: dict, img_count: int

@@ -719,8 +719,21 @@ class ContentGenerationHandler:
         result = []
         for i in range(img_count):
             if i < len(nodes):
-                zh_text = nodes[i].get("zh", "").replace("{scene_description}", scene_zh)
-                result.append(f"第{i + 1}张：{zh_text}")
+                node = nodes[i]
+                # Support both legacy {"zh": "..."} and current {"shot": "...", "desc": "..."}
+                if node.get("zh"):
+                    zh_text = node["zh"]
+                elif node.get("shot") and node.get("desc"):
+                    zh_text = f"{node['shot']}：{node['desc']}"
+                elif node.get("shot"):
+                    zh_text = node["shot"]
+                else:
+                    zh_text = ""
+                zh_text = zh_text.replace("{scene_description}", scene_zh)
+                if zh_text:
+                    result.append(f"第{i + 1}张：{zh_text}")
+                else:
+                    result.append(_default_shot(i))
             else:
                 # ShotPlan nodes exhausted — fall back to default roles
                 result.append(_default_shot(i))

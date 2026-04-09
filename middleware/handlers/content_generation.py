@@ -370,6 +370,20 @@ class ContentGenerationHandler:
             gid = g["group_id"]
             for suffix, prompt_type in self._prompt_types_for_group(g):
                 prompt_code = f"P_{plan_code}_{gid}_{suffix}"
+
+                # Dedup guard: reuse existing prompt record if already created
+                existing = f.list_records(table_prompt, filter_str=f'CurrentValue.[提示词编号] = "{prompt_code}"')
+                if existing:
+                    logger.warning("Prompt record %s already exists, reusing", prompt_code)
+                    results.append({
+                        "group": g,
+                        "suffix": suffix,
+                        "prompt_type": prompt_type,
+                        "prompt_code": prompt_code,
+                        "prompt_record_id": existing[0]["record_id"],
+                    })
+                    continue
+
                 fields = {
                     "提示词编号": prompt_code,
                     "关联规划": [plan_record_id],
@@ -720,8 +734,15 @@ class ContentGenerationHandler:
         mood_zh    = self._EMOTION_ZH.get(emotion_zh, "自然真实")
 
         # --- build core sections (always included) ---
+        # Chain-on-phone attachment note: always injected for phone chain products
+        chain_note = (
+            "手机链通过手机壳底部中间挂绳孔或侧边孔穿入固定，"
+            "链条自然垂坠于手机下方或侧方，比例协调，挂接处自然无穿帮，"
+            "链条长度约为手机高度的1/2至等长，不拉扯变形"
+        )
         core_parts = [
             f"【产品】{product_desc}",
+            f"【挂接规范】{chain_note}",
             "",
             f"【场景】{scene_zh}" if scene_zh else "",
             f"风格：{style_words}。情绪：{mood_zh}。" if style_words else f"情绪：{mood_zh}。",
@@ -845,9 +866,11 @@ class ContentGenerationHandler:
                 else:
                     zh_text = ""
 
+                had_placeholder = "{scene_description}" in zh_text
                 zh_text = zh_text.replace("{scene_description}", scene_zh)
+                effective_scene_suffix = "" if had_placeholder else scene_suffix
                 if zh_text:
-                    result.append(f"第{i + 1}张：{zh_text}{scene_suffix}{person_suffix}{consistency_note}")
+                    result.append(f"第{i + 1}张：{zh_text}{effective_scene_suffix}{person_suffix}{consistency_note}")
                 else:
                     result.append(_default_shot(i))
             else:
@@ -1070,6 +1093,13 @@ class ContentGenerationHandler:
             gid = g["group_id"]
             content_code = f"{plan_code}_{gid}"
             is_img = g["type"] == "img"
+
+            # Dedup guard: skip if a content record with this code already exists
+            existing_recs = f.list_records(table_content, filter_str=f'CurrentValue.[内容编号] = "{content_code}"')
+            if existing_recs:
+                logger.warning("Content record %s already exists, skipping creation", content_code)
+                content_record_ids.append(existing_recs[0]["record_id"])
+                continue
 
             # Base content record
             content_fields: dict = {

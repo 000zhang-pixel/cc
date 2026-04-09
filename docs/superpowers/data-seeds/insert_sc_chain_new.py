@@ -9,7 +9,7 @@ APPEARANCE = "年轻亚洲女性，身材比例好，精致五官，自然妆感
 scenes = [
     {
         "场景编号": "SC039",
-        "场景名称": "首图·街头手链正面亮相",
+        "场景名称": "首图·街头手机链正面亮相",
         "场景类型": "首图专用",
         "场景描述_中文": "年轻亚洲女性正面或四分之三侧面站立，手持挂链手机，链条清晰垂坠，街头或城市背景虚化，整体传递时髦精致的第一眼印象",
         "场景基底_英文": "young Asian woman facing camera holding phone with decorative chain strap, chain clearly visible, urban street bokeh background, fashion-forward first impression, young Asian woman, slim proportions, natural makeup, 20s",
@@ -53,7 +53,7 @@ scenes = [
     },
     {
         "场景编号": "SC041",
-        "场景名称": "首图·近景手链低头特写",
+        "场景名称": "首图·近景手机链低头含蓄",
         "场景类型": "首图专用",
         "场景描述_中文": "年轻亚洲女性低头看手机，手机链清晰入镜，面部若隐若现，手部与链条占画面主体，背景极简或浅色虚化，精致感爆棚",
         "场景基底_英文": "young Asian woman looking down at phone with chain strap prominently featured, face partially visible showing natural beauty, hand and chain as focal point, clean minimal background, close-up lifestyle, young Asian woman, slim proportions, natural makeup, 20s",
@@ -63,7 +63,7 @@ scenes = [
         "适用平台": "得物",
         "是否启用": True,
         "权重": 10,
-        "景别": "近景/特写",
+        "景别": "近景/半身",
         "光源类型": "自然光",
         "拍摄角度": "略俯",
         "人物类型": "真人出镜",
@@ -71,7 +71,7 @@ scenes = [
         "姿态倾向": "低头看手机",
         "性别倾向": "女",
         "年龄段": "18-26岁",
-        "备注": "首图专用高权重场景：低头持机含蓄人物感+链条特写，兼顾颜值与产品"
+        "备注": "首图专用高权重场景：低头持机含蓄人物感+手机链展示，兼顾颜值与产品"
     }
 ]
 

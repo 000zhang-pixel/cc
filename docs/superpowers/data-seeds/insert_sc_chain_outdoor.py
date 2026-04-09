@@ -1,0 +1,253 @@
+import json, subprocess, os, time
+
+BASE_TOKEN = "Ei9jbcsHianwvvsn5xScH8ANnnb"
+TABLE_ID = "tbliWlwiyA4sppgY"
+LARK_CLI = r"C:\Users\carson\AppData\Roaming\npm\lark-cli.cmd"
+
+APPEARANCE = "年轻亚洲女性，时尚性感，身材好曲线自然，精致五官，表情自然真实，轻妆或自然妆，无过度美颜无过度修图"
+
+scenes = [
+    {
+        "场景编号": "SC062",
+        "场景名称": "首图·海边沙滩链条阳光亮相",
+        "场景类型": "首图专用",
+        "场景描述_中文": "年轻亚洲女性站于海边沙滩，海风吹拂发丝，手持挂链手机，链条在海边强烈日光下泛出金属光泽，背景蓝天海浪虚化，传递度假时髦感",
+        "场景基底_英文": "young Asian woman on sandy beach with ocean background, sea breeze in hair, holding phone with chain shining in bright sunlight, chain catching metallic glint, blurred blue sky and waves bokeh, vacation chic atmosphere, young Asian woman, fashionable sexy, natural curves, natural makeup, 20s",
+        "风格基调词": "海边度假,阳光金属感,自由时髦",
+        "排除描述": "不要沙子遮挡链条，不要背景海浪过于汹涌，不要强光过爆人物，不要过于商业化摆拍感",
+        "适用品类": "手机链",
+        "适用平台": "得物",
+        "是否启用": True,
+        "权重": 9,
+        "景别": "中景/半身",
+        "光源类型": "自然强光（海边日照）",
+        "拍摄角度": "平视",
+        "人物类型": "真人出镜",
+        "外貌风格": APPEARANCE,
+        "姿态倾向": "自然站立/发丝飘动",
+        "性别倾向": "女",
+        "年龄段": "18-26岁",
+        "备注": "首图高权重：海边场景差异化，阳光强光下链条金属感突出，度假时髦风"
+    },
+    {
+        "场景编号": "SC063",
+        "场景名称": "首图·山顶/高处俯瞰持机",
+        "场景类型": "首图专用",
+        "场景描述_中文": "年轻亚洲女性站立于山顶、天台或高处栏杆旁，手持挂链手机，背景城市全景或山野风光大虚化，链条清晰，整体气势开阔有高度感",
+        "场景基底_英文": "young Asian woman standing at mountain top, rooftop or high vantage point, holding phone with chain, expansive panoramic city or nature background in deep bokeh, chain clearly visible, elevated and liberating atmosphere, young Asian woman, fashionable sexy, natural curves, natural makeup, 20s",
+        "风格基调词": "高度开阔,气势感,自由俯瞰",
+        "排除描述": "不要高空恐高感过强，不要背景完全无细节，不要链条被风吹到不可见，不要危险姿势",
+        "适用品类": "手机链",
+        "适用平台": "得物",
+        "是否启用": True,
+        "权重": 9,
+        "景别": "中景/半身",
+        "光源类型": "自然光",
+        "拍摄角度": "平视/略俯",
+        "人物类型": "真人出镜",
+        "外貌风格": APPEARANCE,
+        "姿态倾向": "站立眺望/面向镜头",
+        "性别倾向": "女",
+        "年龄段": "18-26岁",
+        "备注": "首图高权重：高处开阔背景，视觉震撼，链条与广阔背景形成精致对比"
+    },
+    {
+        "场景编号": "SC064",
+        "场景名称": "首图·秋日落叶街道持机",
+        "场景类型": "首图专用",
+        "场景描述_中文": "年轻亚洲女性漫步于铺满落叶的秋日街道或林荫道，手持挂链手机，秋日暖橙色调氛围，链条与落叶的暖色系形成呼应，背景树叶虚化",
+        "场景基底_英文": "young Asian woman walking on autumn street covered in fallen leaves, holding phone with chain, warm orange autumnal tones, chain colors complementing the autumn palette, blurred leaf bokeh background, cozy seasonal atmosphere, young Asian woman, fashionable sexy, natural curves, natural makeup, 20s",
+        "风格基调词": "秋日暖调,落叶氛围,季节感",
+        "排除描述": "不要落叶遮挡链条，不要秋色过于饱和失真，不要背景完全没有秋意，不要人物穿搭与秋季严重不符",
+        "适用品类": "手机链",
+        "适用平台": "得物",
+        "是否启用": True,
+        "权重": 9,
+        "景别": "中景/半身",
+        "光源类型": "自然散射光（秋日）",
+        "拍摄角度": "平视",
+        "人物类型": "真人出镜",
+        "外貌风格": APPEARANCE,
+        "姿态倾向": "漫步/自然行走",
+        "性别倾向": "女",
+        "年龄段": "18-26岁",
+        "备注": "首图高权重：秋日场景季节感强，氛围感突出，秋冬营销节点使用"
+    },
+    {
+        "场景编号": "SC065",
+        "场景名称": "首图·樱花/花海户外盛放背景",
+        "场景类型": "首图专用",
+        "场景描述_中文": "年轻亚洲女性站于樱花树下或花海中，手持挂链手机，粉白花瓣虚化背景衬托人物，链条金属色与花海粉系形成高级对比，传递浪漫春日感",
+        "场景基底_英文": "young Asian woman standing under cherry blossom tree or in flower field, holding phone with chain, soft pink petals in blurred background, metallic chain contrasting with pastel floral tones, romantic spring atmosphere, young Asian woman, fashionable sexy, natural curves, natural makeup, 20s",
+        "风格基调词": "樱花浪漫,春日粉调,金属与花的对比",
+        "排除描述": "不要花瓣完全遮挡链条，不要粉色过饱和俗气，不要人物被花海淹没主次不分，不要背景花朵喧宾夺主",
+        "适用品类": "手机链",
+        "适用平台": "得物",
+        "是否启用": True,
+        "权重": 9,
+        "景别": "中景/半身",
+        "光源类型": "自然散射光（春日）",
+        "拍摄角度": "平视/略俯",
+        "人物类型": "真人出镜",
+        "外貌风格": APPEARANCE,
+        "姿态倾向": "自然站立/微抬头",
+        "性别倾向": "女",
+        "年龄段": "18-26岁",
+        "备注": "首图高权重：樱花场景春季感强，视觉浪漫，春季营销节点首选"
+    },
+    {
+        "场景编号": "SC066",
+        "场景名称": "首图·骑行/单车旁持机",
+        "场景类型": "首图专用",
+        "场景描述_中文": "年轻亚洲女性骑行或站于单车/自行车旁，手持挂链手机，链条自然垂落，背景户外道路或公园虚化，传递运动休闲的活力时髦感",
+        "场景基底_英文": "young Asian woman cycling or standing next to bicycle, holding phone with chain hanging naturally, blurred outdoor road or park background, sporty casual chic energy with chain as styling detail, young Asian woman, fashionable sexy, natural curves, natural makeup, 20s",
+        "风格基调词": "运动休闲,骑行活力,户外时髦",
+        "排除描述": "不要单车遮挡链条，不要运动感过重变成运动广告，不要背景过于单一，不要链条被骑行手套遮挡",
+        "适用品类": "手机链",
+        "适用平台": "得物",
+        "是否启用": True,
+        "权重": 8,
+        "景别": "中景/全身",
+        "光源类型": "自然光",
+        "拍摄角度": "平视",
+        "人物类型": "真人出镜",
+        "外貌风格": APPEARANCE,
+        "姿态倾向": "骑行/倚靠单车",
+        "性别倾向": "女",
+        "年龄段": "18-26岁",
+        "备注": "首图：骑行场景运动休闲感，链条作为时髦配饰点睛，覆盖活力用户群"
+    },
+    {
+        "场景编号": "SC067",
+        "场景名称": "首图·市集/露天集市逛街持机",
+        "场景类型": "首图专用",
+        "场景描述_中文": "年轻亚洲女性在周末市集或露天集市中驻足挑选，手持挂链手机，背景市集摊位色彩丰富虚化，传递有趣生活感与时髦购物态度",
+        "场景基底_英文": "young Asian woman browsing at weekend market or outdoor bazaar, holding phone with chain, colorful market stall background blurred, vibrant lifestyle feel with phone chain as fashion accent, young Asian woman, fashionable sexy, natural curves, natural makeup, 20s",
+        "风格基调词": "市集活力,生活感,彩色背景",
+        "排除描述": "不要市集背景太凌乱抢眼，不要链条被购物袋遮挡，不要人物表情过于严肃，不要色彩搭配混乱",
+        "适用品类": "手机链",
+        "适用平台": "得物",
+        "是否启用": True,
+        "权重": 8,
+        "景别": "中景/半身",
+        "光源类型": "自然光",
+        "拍摄角度": "平视",
+        "人物类型": "真人出镜",
+        "外貌风格": APPEARANCE,
+        "姿态倾向": "驻足挑选/行走",
+        "性别倾向": "女",
+        "年龄段": "18-26岁",
+        "备注": "首图：市集场景生活气息强，背景彩色虚化烘托，链条作为潮流单品"
+    },
+    {
+        "场景编号": "SC068",
+        "场景名称": "首图·城市天桥/过街桥持机",
+        "场景类型": "首图专用",
+        "场景描述_中文": "年轻亚洲女性站立于城市天桥上，手持挂链手机，背景城市街道车流灯光虚化，俯瞰视角与链条垂坠感呼应，传递都市节奏感",
+        "场景基底_英文": "young Asian woman standing on city overpass or pedestrian bridge, holding phone with chain, city street and traffic lights bokeh below, urban rhythm atmosphere with chain as key detail, young Asian woman, fashionable sexy, natural curves, natural makeup, 20s",
+        "风格基调词": "都市节奏,天桥俯瞰,城市感",
+        "排除描述": "不要俯瞰感产生恐高不适，不要背景车流过于杂乱，不要链条被栏杆遮挡，不要夜晚过暗",
+        "适用品类": "手机链",
+        "适用平台": "得物",
+        "是否启用": True,
+        "权重": 8,
+        "景别": "中景/半身",
+        "光源类型": "自然光/城市灯光",
+        "拍摄角度": "平视/略俯",
+        "人物类型": "真人出镜",
+        "外貌风格": APPEARANCE,
+        "姿态倾向": "倚靠栏杆/站立眺望",
+        "性别倾向": "女",
+        "年龄段": "18-26岁",
+        "备注": "首图：城市天桥背景，都市感与高度感兼备，链条垂坠与背景城市互动"
+    },
+    {
+        "场景编号": "SC069",
+        "场景名称": "首图·户外草坪野餐持机",
+        "场景类型": "首图专用",
+        "场景描述_中文": "年轻亚洲女性坐或躺于草坪野餐布上，手持挂链手机，周边点缀野餐道具，链条在阳光下自然闪耀，背景绿色草坪虚化，传递惬意户外感",
+        "场景基底_英文": "young Asian woman sitting or lying on picnic blanket on green lawn, holding phone with chain glinting in sunlight, picnic props around, blurred green grass background, carefree outdoor lifestyle, young Asian woman, fashionable sexy, natural curves, natural makeup, 20s",
+        "风格基调词": "野餐惬意,户外放松,阳光草坪",
+        "排除描述": "不要野餐道具遮挡链条，不要草坪过于杂乱，不要姿势过于刻意，不要链条被草叶遮挡",
+        "适用品类": "手机链",
+        "适用平台": "得物",
+        "是否启用": True,
+        "权重": 8,
+        "景别": "中景",
+        "光源类型": "自然光（阳光直射/散射）",
+        "拍摄角度": "平视/略俯",
+        "人物类型": "真人出镜",
+        "外貌风格": APPEARANCE,
+        "姿态倾向": "坐卧放松",
+        "性别倾向": "女",
+        "年龄段": "18-26岁",
+        "备注": "首图：野餐草坪场景，休闲惬意感强，链条与阳光互动，适合夏日内容"
+    },
+    {
+        "场景编号": "SC070",
+        "场景名称": "首图·户外楼梯/台阶侧坐持机",
+        "场景类型": "首图专用",
+        "场景描述_中文": "年轻亚洲女性侧坐于户外石台阶或水泥楼梯上，姿势自然随性，手持挂链手机链条垂于腿侧，背景户外街景或建筑虚化，整体传递真实街头生活感",
+        "场景基底_英文": "young Asian woman casually sitting sideways on outdoor stone steps or concrete stairs, natural relaxed pose, holding phone with chain draping beside leg, blurred street or building background, authentic street life feel, young Asian woman, fashionable sexy, natural curves, natural makeup, 20s",
+        "风格基调词": "街头真实,随性坐姿,户外生活感",
+        "排除描述": "不要坐姿扭曲变形，不要链条被腿完全压住，不要背景过于脏乱，不要楼梯占据画面过多",
+        "适用品类": "手机链",
+        "适用平台": "得物",
+        "是否启用": True,
+        "权重": 8,
+        "景别": "中景",
+        "光源类型": "自然光",
+        "拍摄角度": "平视",
+        "人物类型": "真人出镜",
+        "外貌风格": APPEARANCE,
+        "姿态倾向": "侧坐台阶放松",
+        "性别倾向": "女",
+        "年龄段": "18-26岁",
+        "备注": "首图：台阶坐姿户外场景，真实随性，抓拍感强，链条自然呈现"
+    },
+    {
+        "场景编号": "SC071",
+        "场景名称": "首图·户外自拍手持镜头前推",
+        "场景类型": "首图专用",
+        "场景描述_中文": "户外场景下，年轻亚洲女性将手机+链条朝向镜头前推，模拟自拍动作，链条在手臂伸出时自然垂落，画面呈现手机链条与人物面部半身，户外背景虚化",
+        "场景基底_英文": "young Asian woman outdoors pushing phone with chain toward camera in selfie gesture, chain naturally draping as arm extends, phone chain and person's face/upper body in frame, outdoor blurred background, authentic selfie moment, young Asian woman, fashionable sexy, natural curves, natural makeup, 20s",
+        "风格基调词": "户外自拍,前推感,真实互动感",
+        "排除描述": "不要手臂遮挡链条，不要光线过暗，不要动作看起来太刻意，不要背景干扰主体",
+        "适用品类": "手机链",
+        "适用平台": "得物",
+        "是否启用": True,
+        "权重": 9,
+        "景别": "近景/半身",
+        "光源类型": "自然光",
+        "拍摄角度": "略仰（自拍视角）",
+        "人物类型": "真人出镜",
+        "外貌风格": APPEARANCE,
+        "姿态倾向": "举机朝向镜头前推",
+        "性别倾向": "女",
+        "年龄段": "18-26岁",
+        "备注": "首图高权重：户外自拍场景，亲近感强，链条垂落动态自然，户外背景丰富"
+    },
+]
+
+for s in scenes:
+    tmp_path = f"tmp/_sc_outdoor_{s['场景编号']}.json"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(s, f, ensure_ascii=False)
+
+    result = subprocess.run(
+        [LARK_CLI, "base", "+record-upsert",
+         "--base-token", BASE_TOKEN,
+         "--table-id", TABLE_ID,
+         "--json", f"@{tmp_path}"],
+        capture_output=True, encoding="utf-8", cwd="D:/AI-Content-Hub"
+    )
+    os.remove(tmp_path)
+    code = s["场景编号"]
+    if result.returncode == 0:
+        print(f"OK {code} {s['场景名称']}")
+    else:
+        print(f"FAIL {code} {s['场景名称']}")
+        print("  stderr:", result.stderr[:300])
+    time.sleep(0.5)
+
+print("Done.")

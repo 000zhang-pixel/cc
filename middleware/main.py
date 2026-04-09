@@ -5,6 +5,7 @@ Run from the middleware/ directory:
 """
 import logging
 import logging.handlers
+import queue
 import signal
 import sys
 import threading
@@ -92,6 +93,21 @@ def main():
 
     # --- Init local DB ---
     run_migrations()                 # alembic upgrade head（已是最新则 no-op）
+    # alembic's fileConfig() in env.py overrides the root logger handlers.
+    # Re-attach the RotatingFileHandler so subsequent logs go to middleware.log.
+    _log_file = Path(__file__).parent.parent / "logs" / "middleware.log"
+    _root = logging.getLogger()
+    _root.setLevel(logging.INFO)
+    if not any(
+        isinstance(h, logging.handlers.RotatingFileHandler) for h in _root.handlers
+    ):
+        _fh = logging.handlers.RotatingFileHandler(
+            filename=_log_file, maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8"
+        )
+        _fh.setFormatter(logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+        ))
+        _root.addHandler(_fh)
     engine = db._get_engine()
     db.init_engine(engine)
     logger.info("Local DB initialised: %s", engine.url)

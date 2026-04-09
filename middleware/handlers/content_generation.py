@@ -480,10 +480,16 @@ class ContentGenerationHandler:
         except Exception:
             logger.warning("_lookup_strategy: failed to list records", exc_info=True)
             return None
-        return self._select_best(
+        result = self._select_best(
             records, content_type, platform, category,
             ct_field="适用内容类型", pt_field="适用平台", cat_field="适用品类",
         )
+        logger.info(
+            "_lookup_strategy: content_type=%r platform=%r category=%r enabled_count=%d result=%s",
+            content_type, platform, category, len(records),
+            result["record_id"] if result else None,
+        )
+        return result
 
     def _lookup_shotplan(
         self, content_form: str, content_type: str, category: str
@@ -558,9 +564,11 @@ class ContentGenerationHandler:
             random.shuffle(tier)
             pool.extend(r for _, r in tier)
 
+        # Random start offset so the first group doesn't always get the top-weighted scene
+        start = random.randrange(len(pool))
         assignments: dict = {}
         for i, g in enumerate(groups):
-            scene = pool[i % len(pool)]
+            scene = pool[(start + i) % len(pool)]
             assignments[g["group_id"]] = {
                 "scene_id":        f.get_text(scene, "场景编号"),
                 "scene_record_id": scene["record_id"],
@@ -602,6 +610,7 @@ class ContentGenerationHandler:
         platforms: list[str],
         content_type: str,
         group_type: str = "img",
+        scene: dict | None = None,
     ) -> tuple[str, str]:
         """Build (system_prompt, user_prompt) using a Strategy record from 表8."""
         f = self._feishu
@@ -624,13 +633,29 @@ class ContentGenerationHandler:
 
         platform_str = "、".join(platforms)
         word_count = "50-200字" if group_type == "vid" else "300-800字"
+
+        # Build scene context block if scene info is available
+        scene_block = ""
+        if scene:
+            scene_desc = scene.get("场景描述_中文", "")
+            scene_style = scene.get("风格基调词", "")
+            parts = [p for p in [scene_desc, scene_style] if p]
+            if parts:
+                scene_block = f"\n\n场景设定（请将内容植入此场景氛围中）：{'｜'.join(parts)}"
+
+        # Title guidance from strategy record (optional field)
+        title_guide = f.get_text(strategy, "标题写作指南").strip()
+        title_instruction = (
+            f"<标题（≤20字）>\n参考方向：{title_guide}" if title_guide else "<标题（≤20字）>"
+        )
+
         user = (
             f"请为以下产品生成「{content_type}」类型的完整内容（标题+正文）。\n\n"
             f"目标平台：{platform_str}\n"
             f"内容类型：{content_type}\n\n"
-            f"产品信息：\n{sku_summary}\n\n"
+            f"产品信息：\n{sku_summary}{scene_block}\n\n"
             f"叙事结构（请按顺序展开）：\n{node_lines}\n\n"
-            f"输出格式：\n【标题】\n<标题（≤20字）>\n\n【正文】\n<正文（{word_count}）>"
+            f"输出格式：\n【标题】\n{title_instruction}\n\n【正文】\n<正文（{word_count}）>"
         )
         return system, user
 
@@ -763,9 +788,22 @@ class ContentGenerationHandler:
         scene_zh = scene.get("场景描述_中文", "").strip()
         scene_suffix = f"，{scene_zh}" if scene_zh else ""
 
+        # Build person suffix for shots that should include real people
+        person_type = scene.get("人物类型", "").strip()
+        _no_person_types = {"无人物", "纯产品", ""}
+        if person_type and person_type not in _no_person_types:
+            gender    = scene.get("性别倾向", "").strip()
+            age       = scene.get("年龄段", "").strip()
+            appear    = scene.get("外貌风格", "").strip()
+            posture   = scene.get("姿态倾向", "").strip()
+            person_attrs = "、".join(x for x in [gender, age, appear, posture] if x)
+            person_suffix = f"，画面中有{person_type}" + (f"（{person_attrs}）" if person_attrs else "")
+        else:
+            person_suffix = ""
+
         def _default_shot(idx: int) -> str:
             role = self._DEFAULT_SHOT_ROLES[idx % len(self._DEFAULT_SHOT_ROLES)]
-            return f"第{idx + 1}张：{role}{scene_suffix}"
+            return f"第{idx + 1}张：{role}{scene_suffix}{person_suffix}"
 
         if shotplan is None:
             return [_default_shot(i) for i in range(img_count)]
@@ -803,7 +841,7 @@ class ContentGenerationHandler:
 
                 zh_text = zh_text.replace("{scene_description}", scene_zh)
                 if zh_text:
-                    result.append(f"第{i + 1}张：{zh_text}")
+                    result.append(f"第{i + 1}张：{zh_text}{scene_suffix}{person_suffix}")
                 else:
                     result.append(_default_shot(i))
             else:
@@ -844,12 +882,13 @@ class ContentGenerationHandler:
 
             if suffix == "C":
                 # Text/copy prompt — use Strategy if available, else hardcoded
+                scene = scene_assignments.get(gid, {})
                 strategy = self._lookup_strategy(
                     content_type, platforms[0] if platforms else "", category
                 )
                 if strategy:
                     _system_prompt, user_prompt = self._build_text_prompts_from_strategy(
-                        strategy, sku_summary, platforms, content_type, g["type"]
+                        strategy, sku_summary, platforms, content_type, g["type"], scene=scene
                     )
                     # Store the prompt instructions only; actual AI content generation
                     # happens in _generate_content() (step 9) to keep 表3 prompt-only.

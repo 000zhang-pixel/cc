@@ -12,6 +12,7 @@ class Task:
     record_id: str          # Feishu record ID
     payload: dict           # snapshot of key fields at detection time
     created_at: datetime = field(default_factory=datetime.now)
+    extra: dict = field(default_factory=dict)
 
 
 # Task type constants

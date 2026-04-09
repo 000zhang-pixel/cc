@@ -14,7 +14,11 @@ from db.models import Base, _default_db_path
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # Only apply alembic's logging config when logging hasn't been set up yet
+    # (i.e., when running alembic CLI directly, not from within the middleware process).
+    import logging
+    if not logging.root.handlers:
+        fileConfig(config.config_file_name)
 
 # Wire up ORM metadata for autogenerate
 target_metadata = Base.metadata

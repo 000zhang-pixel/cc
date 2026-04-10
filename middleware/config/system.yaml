@@ -24,11 +24,11 @@ local_storage:
 
 publish:
   dewu:
-    engine_script: "D:/AI-Content-Hub/publish-engine/publish_engine_v40.sh"
+    engine_script: "${PUBLISH_ENGINE_SCRIPT}"
 
 notifications:
   enabled: true
-  chat_id: "oc_2a18512a232920019a216346de01379a"
+  chat_id: "${NOTIFICATION_CHAT_ID}"
   notify_on:
     queued: false    # 待发布进队 — Base表可查，默认静默
     success: true    # 发布成功 — 运营确认用，可关

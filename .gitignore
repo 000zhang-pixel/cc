@@ -11,6 +11,9 @@ build/
 content-store/
 logs/
 *.log
+data/*.db
+data/*.db-shm
+data/*.db-wal
 .claude/
 .superpowers/
 middleware/_launcher.vbs

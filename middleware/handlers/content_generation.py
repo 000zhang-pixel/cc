@@ -635,6 +635,7 @@ class ContentGenerationHandler:
         try:
             nodes = json.loads(nodes_raw) if nodes_raw else []
         except json.JSONDecodeError:
+            # Plain text fallback: "节点A → 节点B → 节点C" or "节点A\n节点B"
             nodes = []
 
         if nodes:
@@ -642,6 +643,12 @@ class ContentGenerationHandler:
                 f"{n['index']}. 【{n.get('zh', n.get('node', ''))}】{n.get('guidance', '')}"
                 for n in nodes
             )
+        elif nodes_raw:
+            # Parse arrow-delimited or newline-delimited plain text into numbered steps
+            import re as _re
+            raw_parts = _re.split(r"→|->|\n", nodes_raw)
+            raw_parts = [p.strip() for p in raw_parts if p.strip()]
+            node_lines = "\n".join(f"{i + 1}. 【{p}】" for i, p in enumerate(raw_parts))
         else:
             node_lines = "（按内容类型的常规结构展开）"
 
@@ -919,9 +926,10 @@ class ContentGenerationHandler:
                     _system_prompt, user_prompt = self._build_text_prompts_from_strategy(
                         strategy, sku_summary, platforms, content_type, g["type"], scene=scene
                     )
-                    # Store the prompt instructions only; actual AI content generation
-                    # happens in _generate_content() (step 9) to keep 表3 prompt-only.
-                    f.update_record(table_prompt, record_id, {"总Prompt": user_prompt})
+                    # Store both system and user prompts; _generate_content will split them.
+                    # Format: "[SYS]\n{system}\n[USR]\n{user}"
+                    combined_prompt = f"[SYS]\n{_system_prompt}\n[USR]\n{user_prompt}"
+                    f.update_record(table_prompt, record_id, {"总Prompt": combined_prompt})
                 else:
                     system_prompt, user_prompt = self._build_meta_prompt(
                         suffix, prompt_type, sku_summary, cfg, g, tag_str
@@ -1161,6 +1169,16 @@ class ContentGenerationHandler:
             c_prompt_text = f.get_text(c_prompt_rec, "总Prompt") if c_prompt_rec else ""
             i_prompt_text = f.get_text(i_prompt_rec, "总Prompt") if i_prompt_rec else ""
 
+            # Parse strategy system prompt from combined [SYS]/[USR] format if present
+            _SYS_MARKER = "[SYS]\n"
+            _USR_MARKER = "\n[USR]\n"
+            if c_prompt_text.startswith(_SYS_MARKER) and _USR_MARKER in c_prompt_text:
+                _split_idx = c_prompt_text.index(_USR_MARKER)
+                c_system_prompt = c_prompt_text[len(_SYS_MARKER):_split_idx]
+                c_prompt_text = c_prompt_text[_split_idx + len(_USR_MARKER):]
+            else:
+                c_system_prompt = None
+
             update: dict = {}
             fail_reason = None
 
@@ -1168,11 +1186,22 @@ class ContentGenerationHandler:
                 # --- Generate text (title + body + tags) ---
                 try:
                     text_adapter = build_text_adapter(cfg["text_model_name"], self._model_params)
-                    text_result = text_adapter.complete(
-                        "你是专业的电商种草文案撰写者，请严格按照Prompt要求生成内容。"
-                        "输出格式：\n【标题】\n<标题>\n\n【正文】\n<正文>",
-                        c_prompt_text,
+                    _BASE_SYSTEM = (
+                        "你是专业的电商种草文案撰写者，深谙得物、小红书、抖音等平台的爆款内容规律。\n"
+                        "写作要求：\n"
+                        "1. 标题必须有钩子感（痛点/数字/反转/共鸣），禁止平铺直述\n"
+                        "2. 正文严格按照给定的叙事节点顺序展开，每个节点有明确的情绪递进\n"
+                        "3. 语言口语化、真实感强，像真人在分享，不要广告腔\n"
+                        "4. 适当使用emoji增强氛围感，但不过度堆砌\n"
+                        "5. 结尾有行动引导或情感共鸣点\n\n"
+                        "输出格式：\n【标题】\n<标题>\n\n【正文】\n<正文>"
                     )
+                    # Use strategy-specific system prompt if available; append base rules as suffix
+                    if c_system_prompt:
+                        system_for_generation = c_system_prompt + "\n\n" + _BASE_SYSTEM
+                    else:
+                        system_for_generation = _BASE_SYSTEM
+                    text_result = text_adapter.complete(system_for_generation, c_prompt_text)
                     title, body, _ = self._parse_text_result(text_result)
                     tags_text = " ".join(tags) if tags else ""
                     update["标题"] = title

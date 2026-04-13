@@ -1102,62 +1102,80 @@ class ContentGenerationHandler:
             content_code = f"{plan_code}_{gid}"
             is_img = g["type"] == "img"
 
-            # Dedup guard: skip if a content record with this code already exists
+            # Dedup guard: if content record exists, check whether image generation needs retry
             existing_recs = f.list_records(table_content, filter_str=f'CurrentValue.[内容编号] = "{content_code}"')
             if existing_recs:
-                logger.warning("Content record %s already exists, skipping creation", content_code)
-                content_record_ids.append(existing_recs[0]["record_id"])
-                continue
+                existing_rec = existing_recs[0]
+                content_record_id = existing_rec["record_id"]
+                existing_gen_status = f.get_option(existing_rec, "生成状态")
+                # If already successfully generated, skip entirely
+                if existing_gen_status == "已生成":
+                    logger.info("Content record %s already generated, skipping", content_code)
+                    content_record_ids.append(content_record_id)
+                    continue
+                # Otherwise (生成失败 / 生成中 / blank) — retry generation without recreating the record
+                logger.warning(
+                    "Content record %s exists with status=%r — retrying generation",
+                    content_code, existing_gen_status,
+                )
+                content_record_ids.append(content_record_id)
+                # Reset status to 生成中 and clear failure reason
+                f.update_record(table_content, content_record_id, {"生成状态": "生成中", "失败原因": ""})
+                # Fall through to text + image generation below (skip the create block)
+                created_new = False
+            else:
+                created_new = True
 
-            # Base content record
-            content_fields: dict = {
-                "内容编号": content_code,
-                "关联规划": [plan_record_id],
-                "任务类型": task_type,
-                "目标平台": cfg["platforms"][0] if cfg["platforms"] else "",
-                "内容类型": g["content_type"],
-                "内容形态": ("单图文" if g.get("img_per_piece", 4) == 1 else "图文") if is_img else "视频",
-                "生成状态": "生成中",
-                "审核状态": "待审核",
-                "是否需要搬迁素材": "否" if task_type == "AI全创作" else "是",
-                "生成时间": now_ms,
-            }
-            if task_type != "AI全创作":
-                content_fields["搬迁状态"] = "待搬迁"
-            if sku_ids:
-                content_fields["关联SKU"] = sku_ids
+            if created_new:
+                # Base content record
+                content_fields: dict = {
+                    "内容编号": content_code,
+                    "关联规划": [plan_record_id],
+                    "任务类型": task_type,
+                    "目标平台": cfg["platforms"][0] if cfg["platforms"] else "",
+                    "内容类型": g["content_type"],
+                    "内容形态": ("单图文" if g.get("img_per_piece", 4) == 1 else "图文") if is_img else "视频",
+                    "生成状态": "生成中",
+                    "审核状态": "待审核",
+                    "是否需要搬迁素材": "否" if task_type == "AI全创作" else "是",
+                    "生成时间": now_ms,
+                }
+                if task_type != "AI全创作":
+                    content_fields["搬迁状态"] = "待搬迁"
+                if sku_ids:
+                    content_fields["关联SKU"] = sku_ids
 
-            content_record_id = f.create_record(table_content, content_fields)
-            content_record_ids.append(content_record_id)
+                content_record_id = f.create_record(table_content, content_fields)
+                content_record_ids.append(content_record_id)
 
-            # Mirror to local DB
-            db.upsert_content(
-                content_code,
-                feishu_record_id=content_record_id,
-                plan_id=None,   # syncer will resolve FK later
-                task_type=task_type,
-                target_platform=cfg["platforms"][0] if cfg["platforms"] else "",
-                content_type=g["content_type"],
-                content_form=content_fields["内容形态"],
-                gen_status="生成中",
-            )
+                # Mirror to local DB
+                db.upsert_content(
+                    content_code,
+                    feishu_record_id=content_record_id,
+                    plan_id=None,   # syncer will resolve FK later
+                    task_type=task_type,
+                    target_platform=cfg["platforms"][0] if cfg["platforms"] else "",
+                    content_type=g["content_type"],
+                    content_form=content_fields["内容形态"],
+                    gen_status="生成中",
+                )
 
-            # Create skeleton content.json in local storage
-            if self._storage:
-                try:
-                    self._storage.save_content(plan_code, gid, {
-                        "content_code": content_code,
-                        "feishu_record_id": content_record_id,
-                        "platform": cfg["platforms"][0] if cfg["platforms"] else "",
-                        "content_type": g["content_type"],
-                        "content_form": content_fields["内容形态"],
-                        "title": "", "body": "", "tags": "",
-                    }, {})
-                    # Write local folder path back to Feishu record
-                    folder_path = str(self._storage.get_content_path(plan_code, gid))
-                    f.update_record(table_content, content_record_id, {"素材文件夹路径": folder_path})
-                except Exception:
-                    logger.warning("LocalStorage save_content failed for %s", gid, exc_info=True)
+                # Create skeleton content.json in local storage
+                if self._storage:
+                    try:
+                        self._storage.save_content(plan_code, gid, {
+                            "content_code": content_code,
+                            "feishu_record_id": content_record_id,
+                            "platform": cfg["platforms"][0] if cfg["platforms"] else "",
+                            "content_type": g["content_type"],
+                            "content_form": content_fields["内容形态"],
+                            "title": "", "body": "", "tags": "",
+                        }, {})
+                        # Write local folder path back to Feishu record
+                        folder_path = str(self._storage.get_content_path(plan_code, gid))
+                        f.update_record(table_content, content_record_id, {"素材文件夹路径": folder_path})
+                    except Exception:
+                        logger.warning("LocalStorage save_content failed for %s", gid, exc_info=True)
 
             # Get text prompt
             c_pr = pr_map.get((gid, "C"))

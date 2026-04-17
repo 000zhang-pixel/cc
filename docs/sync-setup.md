@@ -32,13 +32,16 @@ git pull
 ### Mac 首次克隆
 
 ```bash
-cd ~/openclaw/workspace
-git clone https://github.com/<your-org>/AI-Content-Hub.git
-cd AI-Content-Hub/middleware
+mkdir -p ~/workspace
+cd ~/workspace
+git clone https://github.com/000zhang-pixel/cc.git ai-content-hub
+cd ai-content-hub/middleware
 pip install -r requirements.txt
 cp .env.mac.example .env
 # 编辑 .env，填入真实 API Keys
 ```
+
+> 说明：仓库代码统一放在 `~/workspace/ai-content-hub`；`middleware/.env` 是本机配置，不通过 Git 跨机器覆盖。
 
 ---
 
@@ -73,7 +76,7 @@ cp .env.mac.example .env
 4. Windows 端会弹出确认提示，同意后两端建立连接
 5. 在 Mac 端接受共享的文件夹，设置本地路径：
    ```
-   /Users/carson/openclaw/workspace/content-store
+   /Users/carson/workspace/ai-content-hub/workspace/content-store
    ```
 
 ### Ignore Patterns（Syncthing 文件夹设置中填入）
@@ -119,17 +122,17 @@ brew install android-platform-tools
 ## 同步后的目录关系
 
 ```
-Windows:                                    Mac (Syncthing 同步):
-D:/AI-Content-Hub/content-store/    ←→     ~/openclaw/workspace/content-store/
-├── inbox/                                  ├── inbox/
-├── Pending_Content/                        ├── Pending_Content/
-└── archive/                                └── archive/
+Windows:                                            Mac (Syncthing 同步):
+D:/AI-Content-Hub/content-store/            ←→     ~/workspace/ai-content-hub/workspace/content-store/
+├── inbox/                                          ├── inbox/
+├── Pending_Content/                                ├── Pending_Content/
+└── archive/                                        └── archive/
 
 代码（GitHub 同步）:
-D:/AI-Content-Hub/          ←→     ~/openclaw/workspace/AI-Content-Hub/
-├── middleware/                     ├── middleware/
-├── publish-engine/                 ├── publish-engine/
-└── docs/                           └── docs/
+D:/AI-Content-Hub/                          ←→     ~/workspace/ai-content-hub/
+├── middleware/                                     ├── middleware/
+├── publish-engine/                                 ├── publish-engine/
+└── docs/                                           └── docs/
 ```
 
 ---

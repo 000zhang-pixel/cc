@@ -36,11 +36,14 @@ mkdir -p "$PROJECT_ROOT/content-store/Pending_Content"
 mkdir -p "$PROJECT_ROOT/content-store/archive"
 mkdir -p "$PROJECT_ROOT/data"
 
-# Check for .env file
-if [ ! -f "$PROJECT_ROOT/.env" ]; then
-    echo "⚠️  .env file not found!"
-    echo "📝 Please copy .env.example and fill in your credentials:"
-    echo "   cp $PROJECT_ROOT/.env.example $PROJECT_ROOT/.env"
+# Check for middleware/.env file (runtime config is loaded from middleware/.env)
+if [ ! -f "$MIDDLEWARE_DIR/.env" ]; then
+    echo "⚠️  middleware/.env file not found!"
+    echo "📝 Please copy the machine-appropriate example and fill in your credentials:"
+    echo "   # macOS"
+    echo "   cp $MIDDLEWARE_DIR/.env.mac.example $MIDDLEWARE_DIR/.env"
+    echo "   # Windows / cross-platform baseline"
+    echo "   cp $MIDDLEWARE_DIR/.env.windows.example $MIDDLEWARE_DIR/.env"
     echo ""
     echo "🔑 Required environment variables:"
     echo "   - LARK_APP_ID"
@@ -48,8 +51,9 @@ if [ ! -f "$PROJECT_ROOT/.env" ]; then
     echo "   - LARK_BASE_TOKEN"
     echo "   - OPENAI_API_KEY or KIMI_API_KEY"
     echo "   - LOCAL_STORAGE_ROOT"
+    echo "   - PUBLISH_ENGINE_SCRIPT"
 else
-    echo "✅ .env file exists"
+    echo "✅ middleware/.env file exists"
 fi
 
 echo ""

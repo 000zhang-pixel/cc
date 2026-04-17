@@ -38,6 +38,18 @@ macOS 上的标准主工作副本路径：
 - Hermes、Claude Code、OpenClaw 等工具都应优先操作这个路径
 - 其他路径下的副本仅允许作为临时备份或归档，不应继续并行开发
 
+### 2.2.1 运行配置按机器分别维护
+
+运行时配置文件 `middleware/.env` 属于**机器本地配置**，不进入 Git，不跨机器直接覆盖。
+
+要求：
+- Mac 与 Windows 各自维护自己的 `middleware/.env`
+- 代码同步只走 GitHub
+- 内容文件同步只同步 `content-store/`
+- 跨机器初始化时，从示例文件复制：
+  - macOS：`middleware/.env.mac.example`
+  - Windows：`middleware/.env.windows.example`
+
 ### 2.3 工具工作目录与项目代码目录分离
 
 以下目录职责分离：

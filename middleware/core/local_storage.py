@@ -182,6 +182,31 @@ class LocalStorage:
         logger.debug("LocalStorage: added file %s → %s", filename, group_dir)
         return dest
 
+    def update_content_debug(self, plan_code: str, group_id: str, debug: dict) -> None:
+        """Write or merge a `debug` block into content.json for observability."""
+        path = self.pending / plan_code / group_id / "content.json"
+        if not path.exists():
+            return
+        data = json.loads(path.read_text(encoding="utf-8"))
+        existing_debug = data.get("debug") or {}
+        existing_debug.update(debug)
+        data["debug"] = existing_debug
+        data["updated_at"] = datetime.now().isoformat(timespec="seconds")
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def append_failed_image_index(self, plan_code: str, group_id: str, idx: int) -> None:
+        """Append a 0-based image index to debug.failed_image_indexes in content.json."""
+        path = self.pending / plan_code / group_id / "content.json"
+        if not path.exists():
+            return
+        data = json.loads(path.read_text(encoding="utf-8"))
+        debug = data.setdefault("debug", {})
+        failed = debug.setdefault("failed_image_indexes", [])
+        if idx not in failed:
+            failed.append(idx)
+        data["updated_at"] = datetime.now().isoformat(timespec="seconds")
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
     def update_status(self, plan_code: str, group_id: str, status: str) -> None:
         """Update the status field in content.json."""
         path = self.pending / plan_code / group_id / "content.json"

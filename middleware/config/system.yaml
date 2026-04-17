@@ -15,6 +15,7 @@ feishu:
     shotplan:     tbl0xCaqru1TjwzK   # 表9 拍摄方案表
     scene:        tbliWlwiyA4sppgY   # 表10 视觉场景表
     sku_stats:    tblJRHExnxytve7s   # SKU发布统计表
+    persona:      ""                 # 表12 Persona人设模板表（飞书新建后填入table_id）
 
 poller:
   interval_seconds: 10

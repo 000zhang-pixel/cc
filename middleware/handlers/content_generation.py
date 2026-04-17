@@ -5,11 +5,15 @@ Full pipeline:
   1. Validate SKU completeness & 上架状态
   2. Read config fields from 表2
   3. Fetch TOP N tags from 表7 by platform + category
-  4. For each img/vid group: create 表3 Prompt records
-  5. Call Prompt engine to fill Prompts in 表3
-  6. Call AI APIs to generate content
-  7. Write results to 表4 内容生成表
-  8. Update 表2 execution status
+  4. build_groups()
+  5. assign_scenes()
+  6. lookup_persona() per group          ← v2 新增
+  7. build_creative_brief() per group    ← v2 新增
+  8. For each img/vid group: create 表3 Prompt records
+  9. fill_prompts_from_brief()           ← v2 升级
+  10. Call AI APIs to generate content
+  11. Write results to 表4 内容生成表
+  12. Update 表2 execution status
 """
 import json
 import logging
@@ -141,18 +145,34 @@ class ContentGenerationHandler:
         # --- 5b. Assign scenes to groups (merges into plan.json) ---
         scene_assignments = self._assign_scenes(groups, sku_fields, plan_code)
 
+        # --- 5c. Lookup persona per group & build Creative Briefs ---
+        # Inject category into cfg so Brief builder can access it without extra lookup
+        cfg["_category"] = self._feishu.get_option({"fields": sku_fields}, "品类")
+        persona_assignments = self._assign_personas(groups, sku_fields, cfg, scene_assignments)
+        briefs = self._build_creative_briefs(groups, cfg, scene_assignments, persona_assignments)
+
+        # Persist briefs to plan.json for observability
+        if self._storage:
+            try:
+                self._storage.update_plan(plan_code, {"briefs": briefs})
+            except Exception:
+                logger.warning("Failed to write briefs to plan.json", exc_info=True)
+
         # --- 6. Create Prompt records in 表3 ---
         prompt_records = self._create_prompt_records(record_id, groups, plan_fields, sku_fields, cfg)
 
         # --- 7. Generate Prompts via Prompt engine ---
         text_adapter = build_text_adapter(cfg["text_model_name"], self._model_params)
-        self._fill_prompts(prompt_records, sku_fields, cfg, tags, text_adapter, scene_assignments)
+        self._fill_prompts(prompt_records, sku_fields, cfg, tags, text_adapter, scene_assignments, briefs)
 
         # --- 8. Mark all prompts 已确认 ---
         for pr in prompt_records:
             f.update_record(self._tables["prompt"], pr["prompt_record_id"], {"状态": "已确认"})
 
         # --- 9. Generate content (call AI APIs) ---
+        # Inject briefs/personas into cfg for _generate_content observability writes
+        cfg["_briefs"] = briefs
+        cfg["_persona_assignments"] = persona_assignments
         content_record_ids = self._generate_content(groups, prompt_records, sku_fields, cfg, record_id, tags)
 
         # --- 10. Update plan status ---
@@ -250,6 +270,11 @@ class ContentGenerationHandler:
             "text_model_name":  _normalize_model(f.get_option(dummy, "文案模型",  "kimi-k2.5")),
             "image_model_name": _normalize_model(f.get_option(dummy, "图片模型",  "volcengine-seedream")),
             "video_model_name": _normalize_model(f.get_option(dummy, "视频模型",  "volcengine-seedance")),
+            # v2 新增可选控制字段 — 飞书表中若未建立这些字段会返回空值，均有安全默认值
+            "diff_strength":   f.get_option(dummy, "差异化强度")  or "中",   # 低/中/高
+            "persona_mode":    f.get_option(dummy, "人设模式")    or "自动",  # 自动/固定主人设/多人设轮换
+            "consistency_strength": f.get_option(dummy, "一致性强度") or "强",   # 中/强
+            "scene_variety":   f.get_option(dummy, "场景丰富度")  or "中",   # 低/中/高
         }
 
     # ------------------------------------------------------------------
@@ -614,6 +639,225 @@ class ContentGenerationHandler:
         return assignments
 
     # ------------------------------------------------------------------
+    # Persona lookup  (表12 Persona人设模板表)
+    # ------------------------------------------------------------------
+
+    def _assign_personas(
+        self, groups: list[dict], sku_fields: dict, cfg: dict,
+        scene_assignments: dict,
+    ) -> dict:
+        """
+        Assign one Persona record per group.  Falls back gracefully:
+          1. If 表12 is configured and has matching records → use Persona table
+          2. Otherwise → derive pseudo-persona from Scene person fields (existing behavior)
+
+        Returns {group_id: persona_dict_or_None}
+        """
+        f = self._feishu
+        table_id = self._tables.get("persona", "")
+        category = f.get_option({"fields": sku_fields}, "品类")
+        persona_mode = cfg.get("persona_mode", "自动")   # 自动 / 固定主人设 / 多人设轮换
+
+        persona_pool: list[dict] = []
+        if table_id:
+            try:
+                records = f.list_records(table_id, filter_str='CurrentValue.[是否启用]="启用"')
+                # Filter by category (empty 适用品类 = 通用)
+                for r in records:
+                    cats = f.get_options(r, "适用品类") or []
+                    if not cats or category in cats:
+                        prio = int(f.get_number(r, "优先级", 0))
+                        persona_pool.append((prio, r))
+                persona_pool.sort(key=lambda x: x[0], reverse=True)
+                persona_pool = [r for _, r in persona_pool]
+                logger.info("_assign_personas: table configured, pool_size=%d", len(persona_pool))
+            except Exception:
+                logger.warning("_assign_personas: failed to read Persona table", exc_info=True)
+                persona_pool = []
+
+        assignments: dict = {}
+
+        if persona_pool:
+            # Determine which persona to use per group
+            if persona_mode == "固定主人设":
+                # All groups share the top-priority persona
+                fixed = persona_pool[0]
+                for g in groups:
+                    assignments[g["group_id"]] = self._extract_persona_fields(fixed)
+            else:
+                # 自动 / 多人设轮换: rotate through pool
+                start = random.randrange(len(persona_pool))
+                for i, g in enumerate(groups):
+                    persona = persona_pool[(start + i) % len(persona_pool)]
+                    assignments[g["group_id"]] = self._extract_persona_fields(persona)
+        else:
+            # Fallback: derive pseudo-persona from Scene person fields
+            for g in groups:
+                scene = scene_assignments.get(g["group_id"], {})
+                person_type = scene.get("人物类型", "").strip()
+                if person_type and person_type not in ("无人物", "纯产品", ""):
+                    assignments[g["group_id"]] = {
+                        "persona_id": None,
+                        "persona_label": person_type,
+                        "gender": scene.get("性别倾向", ""),
+                        "age": scene.get("年龄段", ""),
+                        "appearance": scene.get("外貌风格", ""),
+                        "posture": scene.get("姿态倾向", ""),
+                        "style": "",
+                        "action": "",
+                        "prompt_template": "",
+                        "consistency_template": "",
+                        "source": "scene_fallback",
+                    }
+                else:
+                    assignments[g["group_id"]] = None
+
+        return assignments
+
+    def _extract_persona_fields(self, persona_rec: dict) -> dict:
+        """Extract Persona table fields into a flat dict."""
+        f = self._feishu
+        return {
+            "persona_id":             f.get_text(persona_rec, "人设编号"),
+            "persona_label":          f.get_text(persona_rec, "人设名称"),
+            "gender":                 f.get_option(persona_rec, "性别倾向"),
+            "age":                    f.get_option(persona_rec, "年龄段"),
+            "appearance":             f.get_text(persona_rec, "外貌风格"),
+            "style":                  f.get_text(persona_rec, "穿搭风格"),
+            "action":                 f.get_text(persona_rec, "动作倾向"),
+            "qi_zhi_tags":            f.get_options(persona_rec, "气质标签"),
+            "prompt_template":        f.get_text(persona_rec, "Prompt描述模板"),
+            "consistency_template":   f.get_text(persona_rec, "一致性锚点模板"),
+            "source": "persona_table",
+        }
+
+    # ------------------------------------------------------------------
+    # Creative Brief  (per-group unified intent object)
+    # ------------------------------------------------------------------
+
+    # Ordered title pattern pool (also used by _build_text_prompts_from_strategy for legacy path)
+    _TITLE_PATTERNS = [
+        "疑问句式（如：为什么我…？）",
+        "数字/对比句式（如：买了X件才发现…）",
+        "场景直述句式（如：健身/通勤/约会时…）",
+        "反转/意外句式（如：没想到一条链子竟然…）",
+        "情绪共鸣句式（如：那种感觉就是…）",
+    ]
+
+    _NARRATIVE_ANGLES = [
+        "搭配点睛",
+        "日常实用",
+        "细节质感",
+        "氛围感种草",
+        "礼物推荐",
+    ]
+
+    _STRUCTURE_MODES = [
+        "场景切入",
+        "痛点切入",
+        "体验切入",
+        "对比切入",
+        "情绪切入",
+    ]
+
+    def _build_creative_briefs(
+        self, groups: list[dict], cfg: dict,
+        scene_assignments: dict, persona_assignments: dict,
+    ) -> dict:
+        """
+        Build one Creative Brief dict per group.
+        Brief consolidates: strategy_id, scene_id, persona_id, shotplan_id,
+        title_pattern, narrative_angle, structure_mode, consistency_anchor.
+        """
+        f = self._feishu
+        platform = cfg["platforms"][0] if cfg["platforms"] else ""
+        category = cfg.get("_category", "")   # will be populated below if empty
+
+        # Only C-suffix groups for indexing (determines title pattern rotation)
+        img_groups = [g for g in groups if g["type"] == "img"]
+        total_img = len(img_groups)
+
+        # Differentiation strength → how far apart narrative angles / structure modes spread
+        diff_strength = cfg.get("diff_strength", "中")
+        # scene_variety hints whether to pick very different scenes (already done by _assign_scenes)
+
+        briefs: dict = {}
+        for i, g in enumerate(groups):
+            gid = g["group_id"]
+            content_type = g["content_type"]
+            scene = scene_assignments.get(gid, {})
+            persona = persona_assignments.get(gid)
+
+            # Rotate title pattern per group (img groups only; vid groups inherit index 0)
+            if g["type"] == "img":
+                group_idx = img_groups.index(g)   # 0-based
+                title_pattern = self._TITLE_PATTERNS[group_idx % len(self._TITLE_PATTERNS)]
+                narrative_angle = self._NARRATIVE_ANGLES[group_idx % len(self._NARRATIVE_ANGLES)]
+                structure_mode  = self._STRUCTURE_MODES[group_idx % len(self._STRUCTURE_MODES)]
+            else:
+                title_pattern   = self._TITLE_PATTERNS[0]
+                narrative_angle = self._NARRATIVE_ANGLES[0]
+                structure_mode  = self._STRUCTURE_MODES[0]
+
+            # Try to read narrative angle overrides from Strategy table if it has 叙事角度标签
+            # (non-blocking — if field missing just keep default)
+            strategy_id   = ""
+            shotplan_id   = ""
+            scene_id      = scene.get("scene_id", "")
+            persona_id    = (persona or {}).get("persona_id") or ""
+            persona_label = (persona or {}).get("persona_label") or ""
+
+            # Build consistency_anchor from Persona (preferred) or Scene fallback
+            if persona:
+                tmpl = persona.get("consistency_template", "")
+                if tmpl:
+                    consistency_anchor = tmpl
+                else:
+                    parts = [
+                        persona.get("persona_label", ""),
+                        persona.get("gender", ""),
+                        persona.get("age", ""),
+                        persona.get("appearance", ""),
+                    ]
+                    desc = "、".join(x for x in parts if x)
+                    consistency_anchor = f"同一人物（{desc}），同套服装，同款发型，同一面部特征" if desc else ""
+            else:
+                # No persona — build from scene
+                gender = scene.get("性别倾向", "")
+                age    = scene.get("年龄段", "")
+                appear = scene.get("外貌风格", "")
+                desc   = "、".join(x for x in [gender, age, appear] if x)
+                consistency_anchor = f"同一人物（{desc}），同套服装，同款发型，同一面部特征" if desc else ""
+
+            briefs[gid] = {
+                "group_id":           gid,
+                "group_type":         g["type"],
+                "platform":           platform,
+                "content_type":       content_type,
+                "title_pattern":      title_pattern,
+                "narrative_angle":    narrative_angle,
+                "structure_mode":     structure_mode,
+                "persona_id":         persona_id,
+                "persona_label":      persona_label,
+                "scene_id":           scene_id,
+                "scene_mode":         scene.get("场景描述_中文", "")[:30],
+                "strategy_id":        strategy_id,   # filled later by _fill_prompts
+                "shotplan_id":        shotplan_id,   # filled later by _fill_prompts
+                "consistency_anchor": {
+                    "person":  consistency_anchor,
+                    "product": "同一颜色、同一材质、同一挂接方式",
+                    "style":   "统一光线、统一色温、统一画面风格",
+                },
+                "diff_strength":      diff_strength,
+            }
+            logger.info(
+                "_build_creative_briefs: group=%s title_pattern=%r narrative_angle=%r persona=%r scene=%s",
+                gid, title_pattern, narrative_angle, persona_label, scene_id,
+            )
+
+        return briefs
+
+    # ------------------------------------------------------------------
     # Prompt builders (table-driven)
     # ------------------------------------------------------------------
 
@@ -627,8 +871,12 @@ class ContentGenerationHandler:
         scene: dict | None = None,
         group_index: int = 1,
         total_groups: int = 1,
+        brief: dict | None = None,
+        persona: dict | None = None,
     ) -> tuple[str, str]:
-        """Build (system_prompt, user_prompt) using a Strategy record from 表8."""
+        """Build (system_prompt, user_prompt) using a Strategy record from 表8.
+        When `brief` is provided, title_pattern and narrative_angle come from Brief.
+        """
         f = self._feishu
         system = f.get_text(strategy, "系统提示词前缀").strip() or (
             "你是一名专业的电商种草文案策划，擅长为得物/小红书平台创作高转化率内容。"
@@ -637,7 +885,6 @@ class ContentGenerationHandler:
         try:
             nodes = json.loads(nodes_raw) if nodes_raw else []
         except json.JSONDecodeError:
-            # Plain text fallback: "节点A → 节点B → 节点C" or "节点A\n节点B"
             nodes = []
 
         if nodes:
@@ -646,7 +893,6 @@ class ContentGenerationHandler:
                 for n in nodes
             )
         elif nodes_raw:
-            # Parse arrow-delimited or newline-delimited plain text into numbered steps
             import re as _re
             raw_parts = _re.split(r"→|->|\n", nodes_raw)
             raw_parts = [p.strip() for p in raw_parts if p.strip()]
@@ -657,43 +903,103 @@ class ContentGenerationHandler:
         platform_str = "、".join(platforms)
         word_count = "50-200字" if group_type == "vid" else "300-800字"
 
-        # Build scene context block if scene info is available
+        # Build scene context block
         scene_block = ""
         if scene:
             scene_desc = scene.get("场景描述_中文", "")
             scene_style = scene.get("风格基调词", "")
+            # Read new optional field: 道具建议 — adds props richness to text context
+            props_hint = scene.get("道具建议", "").strip()
             parts = [p for p in [scene_desc, scene_style] if p]
             if parts:
                 scene_block = f"\n\n场景设定（请将内容植入此场景氛围中）：{'｜'.join(parts)}"
+                if props_hint:
+                    scene_block += f"。画面道具参考：{props_hint}"
 
-        # Title guidance from strategy record (optional field)
+        # Title guidance — prefer Strategy 标题句式池 JSON array if present
         title_guide = f.get_text(strategy, "标题写作指南").strip()
+
+        # Read new optional Strategy field: 标题句式池
+        title_pool_raw = ""
+        try:
+            title_pool_raw = f.get_text(strategy, "标题句式池").strip()
+        except Exception:
+            pass
+
+        title_pool: list[str] = []
+        if title_pool_raw:
+            try:
+                parsed = json.loads(title_pool_raw)
+                if isinstance(parsed, list):
+                    title_pool = [str(x) for x in parsed if x]
+            except (json.JSONDecodeError, Exception):
+                pass
+
+        # Resolve this group's title pattern:
+        # 1. From Brief (preferred — already rotated by _build_creative_briefs)
+        # 2. From Strategy 标题句式池 (table-configured pool)
+        # 3. From hardcoded _TITLE_PATTERNS (legacy fallback)
+        if brief:
+            this_pattern = brief.get("title_pattern") or self._TITLE_PATTERNS[(group_index - 1) % len(self._TITLE_PATTERNS)]
+            narrative_angle = brief.get("narrative_angle", "")
+            structure_mode  = brief.get("structure_mode", "")
+        else:
+            if title_pool:
+                this_pattern = title_pool[(group_index - 1) % len(title_pool)]
+            else:
+                this_pattern = self._TITLE_PATTERNS[(group_index - 1) % len(self._TITLE_PATTERNS)]
+            narrative_angle = ""
+            structure_mode  = ""
+
         title_instruction = (
             f"<标题（≤20字）>\n参考方向：{title_guide}" if title_guide else "<标题（≤20字）>"
         )
 
-        # Diversity instruction: tell the LLM which piece this is so it varies structure
+        # Read new optional Strategy field: 差异化提示模板
+        diff_template = ""
+        try:
+            diff_template = f.get_text(strategy, "差异化提示模板").strip()
+        except Exception:
+            pass
+
+        # Diversity instruction block
         diversity_block = ""
         if total_groups > 1:
-            _title_patterns = [
-                "疑问句式（如：为什么我…？）",
-                "数字/对比句式（如：买了X件才发现…）",
-                "场景直述句式（如：健身/通勤/约会时…）",
-                "反转/意外句式（如：没想到一条链子竟然…）",
-                "情绪共鸣句式（如：那种感觉就是…）",
-            ]
-            this_pattern = _title_patterns[(group_index - 1) % len(_title_patterns)]
-            diversity_block = (
-                f"\n\n⚠️ 差异化要求：这是本产品第 {group_index} 篇笔记（共 {total_groups} 篇）。"
-                f"标题请采用「{this_pattern}」，叙事切入角度必须与其他篇次明显区分，"
-                f"禁止重复相同的开头句式或叙事骨架。"
-            )
+            if diff_template:
+                # Use table-configured template, substituting placeholders
+                diversity_block = (
+                    "\n\n" + diff_template
+                    .replace("{group_index}", str(group_index))
+                    .replace("{total_groups}", str(total_groups))
+                    .replace("{title_pattern}", this_pattern)
+                    .replace("{narrative_angle}", narrative_angle)
+                )
+            else:
+                diversity_block = (
+                    f"\n\n⚠️ 差异化要求：这是本产品第 {group_index} 篇笔记（共 {total_groups} 篇）。"
+                    f"标题请采用「{this_pattern}」"
+                )
+                if narrative_angle:
+                    diversity_block += f"，叙事角度为「{narrative_angle}」"
+                if structure_mode:
+                    diversity_block += f"，结构模式为「{structure_mode}」"
+                diversity_block += "，叙事切入角度必须与其他篇次明显区分，禁止重复相同的开头句式或叙事骨架。"
+
+        # Optional persona context in text (adds persona feeling to scene description)
+        persona_block = ""
+        if persona:
+            pa = persona.get("appearance", "")
+            ps = persona.get("style", "")
+            pq = "、".join(persona.get("qi_zhi_tags") or [])
+            persona_parts = [x for x in [pa, ps, pq] if x]
+            if persona_parts:
+                persona_block = f"\n\n人物感觉参考：{', '.join(persona_parts)}，使用时请自然地将此人物形象融入场景叙事中。"
 
         user = (
             f"请为以下产品生成「{content_type}」类型的完整内容（标题+正文）。\n\n"
             f"目标平台：{platform_str}\n"
             f"内容类型：{content_type}\n\n"
-            f"产品信息：\n{sku_summary}{scene_block}\n\n"
+            f"产品信息：\n{sku_summary}{scene_block}{persona_block}\n\n"
             f"叙事结构（请按顺序展开）：\n{node_lines}{diversity_block}\n\n"
             f"输出格式：\n【标题】\n{title_instruction}\n\n【正文】\n<正文（{word_count}）>"
         )
@@ -724,7 +1030,8 @@ class ContentGenerationHandler:
     _TECH_PARAM_KEYS = ("光线方向", "色温", "景深感", "镜头感")
 
     def _build_image_master_prompt(
-        self, strategy: dict | None, sku_fields: dict, scene: dict
+        self, strategy: dict | None, sku_fields: dict, scene: dict,
+        persona: dict | None = None, brief: dict | None = None,
     ) -> str:
         """Build the master context prompt in Chinese for image generation.
 
@@ -744,12 +1051,18 @@ class ContentGenerationHandler:
         style_words = scene.get("风格基调词", "").strip()
         exclude     = scene.get("排除描述", "").strip()
 
-        # Person fields from scene record
+        # Person fields — prefer Persona table, fallback to Scene
         person_type = scene.get("人物类型", "").strip()
-        gender      = scene.get("性别倾向", "").strip()
-        age_range   = scene.get("年龄段", "").strip()
-        appearance  = scene.get("外貌风格", "").strip()
-        posture     = scene.get("姿态倾向", "").strip()
+        if persona:
+            gender     = persona.get("gender", "").strip() or scene.get("性别倾向", "").strip()
+            age_range  = persona.get("age", "").strip()    or scene.get("年龄段", "").strip()
+            appearance = persona.get("appearance", "").strip() or scene.get("外貌风格", "").strip()
+            posture    = persona.get("action", "").strip()     or scene.get("姿态倾向", "").strip()
+        else:
+            gender     = scene.get("性别倾向", "").strip()
+            age_range  = scene.get("年龄段", "").strip()
+            appearance = scene.get("外貌风格", "").strip()
+            posture    = scene.get("姿态倾向", "").strip()
 
         # Technical parameter fields (single-select, may be empty)
         tech_params = [
@@ -758,6 +1071,9 @@ class ContentGenerationHandler:
 
         emotion_zh = f.get_option(strategy, "情绪基调") if strategy else ""
         mood_zh    = self._EMOTION_ZH.get(emotion_zh, "自然真实")
+
+        # New optional field: 道具建议 from Scene (adds prop variety to image)
+        props_hint = scene.get("道具建议", "").strip()
 
         # --- build core sections (always included) ---
         # Chain-on-phone attachment note: always injected for phone chain products
@@ -782,17 +1098,33 @@ class ContentGenerationHandler:
                 person_line += "，" + "，".join(person_attrs)
             person_part = ["", f"【人物】{person_line}"]
 
-        consistency_part = [
+        # Consistency anchor: use Persona consistency_template if present (richer description)
+        persona_consistency = ""
+        if persona:
+            tmpl = persona.get("consistency_template", "").strip()
+            if tmpl:
+                persona_consistency = tmpl
+        if not persona_consistency and brief:
+            ca = brief.get("consistency_anchor", {})
+            if ca.get("person"):
+                persona_consistency = ca["person"]
+
+        consistency_lines = [
             "",
             "【一致性要求】",
             "- 所有图片保持完全相同的产品外观（颜色、材质、细节）",
-            "- 同一人物（同一人、同套服装、同款发型）",
-            "- 统一光线和色彩风格贯穿始终",
         ]
+        if persona_consistency:
+            consistency_lines.append(f"- {persona_consistency}")
+        else:
+            consistency_lines.append("- 同一人物（同一人、同套服装、同款发型）")
+        consistency_lines.append("- 统一光线和色彩风格贯穿始终")
+        consistency_part = consistency_lines
 
         # Optional sections, dropped first when over budget
         exclude_part = ["", f"【避免】{exclude}"] if exclude else []
         tech_part    = ["", f"【技术参数】{'、'.join(tech_params)}"] if tech_params else []
+        props_part   = ["", f"【道具参考】{props_hint}"] if props_hint else []
 
         def _join(parts_list: list[list[str]]) -> str:
             merged = []
@@ -800,17 +1132,22 @@ class ContentGenerationHandler:
                 merged.extend(p)
             return "\n".join(x for x in merged if x is not None)
 
-        # Try full prompt first
-        full = _join([core_parts, person_part, tech_part, consistency_part, exclude_part])
+        # Try full prompt first (props > tech > exclude drop order)
+        full = _join([core_parts, person_part, props_part, tech_part, consistency_part, exclude_part])
         if len(full) <= self._MASTER_PROMPT_MAX:
             return full
 
         # Drop tech params
+        reduced = _join([core_parts, person_part, props_part, consistency_part, exclude_part])
+        if len(reduced) <= self._MASTER_PROMPT_MAX:
+            return reduced
+
+        # Drop props
         reduced = _join([core_parts, person_part, consistency_part, exclude_part])
         if len(reduced) <= self._MASTER_PROMPT_MAX:
             return reduced
 
-        # Trim exclude to first clause (up to first Chinese comma/period)
+        # Trim exclude to first clause
         if exclude:
             short_excl = exclude.split("，")[0].split("。")[0]
             reduced = _join([core_parts, person_part, consistency_part, ["", f"【避免】{short_excl}"]])
@@ -824,11 +1161,12 @@ class ContentGenerationHandler:
 
         # Last resort: trim scene_zh to ≤60 chars
         if scene_zh and len(scene_zh) > 60:
-            core_parts[2] = f"【场景】{scene_zh[:60]}"
+            core_parts[3] = f"【场景】{scene_zh[:60]}"
         return _join([core_parts, person_part, consistency_part])
 
     def _build_image_sub_prompts(
-        self, shotplan: dict | None, scene: dict, img_count: int
+        self, shotplan: dict | None, scene: dict, img_count: int,
+        persona: dict | None = None, brief: dict | None = None,
     ) -> list[str]:
         """Build per-shot sub-prompts in Chinese from ShotPlan + Scene."""
         f = self._feishu
@@ -836,28 +1174,56 @@ class ContentGenerationHandler:
         scene_suffix = f"，{scene_zh}" if scene_zh else ""
 
         # Build person suffix for shots that should include real people
+        # Persona source (preferred) → Scene fallback
         person_type = scene.get("人物类型", "").strip()
         _no_person_types = {"无人物", "纯产品", ""}
         if person_type and person_type not in _no_person_types:
-            gender    = scene.get("性别倾向", "").strip()
-            age       = scene.get("年龄段", "").strip()
-            appear    = scene.get("外貌风格", "").strip()
-            posture   = scene.get("姿态倾向", "").strip()
+            if persona:
+                gender  = persona.get("gender", "").strip() or scene.get("性别倾向", "").strip()
+                age     = persona.get("age", "").strip()    or scene.get("年龄段", "").strip()
+                appear  = persona.get("appearance", "").strip() or scene.get("外貌风格", "").strip()
+                posture = persona.get("action", "").strip()     or scene.get("姿态倾向", "").strip()
+            else:
+                gender  = scene.get("性别倾向", "").strip()
+                age     = scene.get("年龄段", "").strip()
+                appear  = scene.get("外貌风格", "").strip()
+                posture = scene.get("姿态倾向", "").strip()
+
             person_attrs = "、".join(x for x in [gender, age, appear, posture] if x)
             person_suffix = f"，画面中有{person_type}" + (f"（{person_attrs}）" if person_attrs else "")
-            # Consistency anchor: include fixed appearance description (without posture, which varies per shot)
+
+            # Consistency anchor — prefer Persona consistency_template; else build from appearance
             appearance_anchor = "、".join(x for x in [gender, age, appear] if x)
-            consistency_note = (
-                f"，【一致性约束】本组所有图片为同一人物（{appearance_anchor}）："
-                "保持完全相同的服装（颜色/款式/细节）、相同发型、相同面孔特征，禁止更换服装或人物"
-            )
+            if persona and persona.get("consistency_template"):
+                consistency_note = f"，【一致性约束】{persona['consistency_template']}"
+            elif brief and brief.get("consistency_anchor", {}).get("person"):
+                consistency_note = f"，【一致性约束】{brief['consistency_anchor']['person']}"
+            else:
+                consistency_note = (
+                    f"，【一致性约束】本组所有图片为同一人物（{appearance_anchor}）："
+                    "保持完全相同的服装（颜色/款式/细节）、相同发型、相同面孔特征，禁止更换服装或人物"
+                )
         else:
             person_suffix = ""
             consistency_note = ""
 
+        # Read new optional ShotPlan fields for inter-shot differentiation
+        no_repeat_shots = ""
+        action_variety  = ""
+        if shotplan:
+            try:
+                no_repeat_shots = f.get_text(shotplan, "禁止重复镜头").strip()
+            except Exception:
+                pass
+            try:
+                action_variety = f.get_text(shotplan, "动作变化要求").strip()
+            except Exception:
+                pass
+
         def _default_shot(idx: int) -> str:
             role = self._DEFAULT_SHOT_ROLES[idx % len(self._DEFAULT_SHOT_ROLES)]
-            return f"第{idx + 1}张：{role}{scene_suffix}{person_suffix}{consistency_note}"
+            no_repeat_suffix = f"，【构图约束】{no_repeat_shots}" if no_repeat_shots else ""
+            return f"第{idx + 1}张：{role}{scene_suffix}{person_suffix}{consistency_note}{no_repeat_suffix}"
 
         if shotplan is None:
             return [_default_shot(i) for i in range(img_count)]
@@ -897,7 +1263,8 @@ class ContentGenerationHandler:
                 zh_text = zh_text.replace("{scene_description}", scene_zh)
                 effective_scene_suffix = "" if had_placeholder else scene_suffix
                 if zh_text:
-                    result.append(f"第{i + 1}张：{zh_text}{effective_scene_suffix}{person_suffix}{consistency_note}")
+                    no_repeat_suffix = f"，【构图约束】{no_repeat_shots}" if no_repeat_shots else ""
+                    result.append(f"第{i + 1}张：{zh_text}{effective_scene_suffix}{person_suffix}{consistency_note}{no_repeat_suffix}")
                 else:
                     result.append(_default_shot(i))
             else:
@@ -917,6 +1284,8 @@ class ContentGenerationHandler:
         tags: list[str],
         text_adapter: TextModelAdapter,
         scene_assignments: dict | None = None,
+        briefs: dict | None = None,
+        persona_assignments: dict | None = None,
     ):
         f = self._feishu
         table_prompt = self._tables["prompt"]
@@ -926,6 +1295,10 @@ class ContentGenerationHandler:
         category = f.get_option({"fields": sku_fields}, "品类")
         if scene_assignments is None:
             scene_assignments = {}
+        if briefs is None:
+            briefs = {}
+        if persona_assignments is None:
+            persona_assignments = {}
 
         # Pre-compute ordered list of C-suffix records for group_index tracking
         c_suffix_records = [pr for pr in prompt_records if pr["suffix"] == "C"]
@@ -941,20 +1314,25 @@ class ContentGenerationHandler:
             platforms = cfg["platforms"]
             gid = g["group_id"]
 
+            brief  = briefs.get(gid)
+            persona = persona_assignments.get(gid)
+
             if suffix == "C":
                 # Text/copy prompt — use Strategy if available, else hardcoded
                 scene = scene_assignments.get(gid, {})
                 strategy = self._lookup_strategy(
                     content_type, platforms[0] if platforms else "", category
                 )
+                # Update brief with resolved strategy_id for observability
+                if brief and strategy:
+                    brief["strategy_id"] = strategy.get("record_id", "")
                 if strategy:
                     _group_index = c_group_index_map.get(gid, 1)
                     _system_prompt, user_prompt = self._build_text_prompts_from_strategy(
                         strategy, sku_summary, platforms, content_type, g["type"], scene=scene,
                         group_index=_group_index, total_groups=total_c_groups,
+                        brief=brief, persona=persona,
                     )
-                    # Store both system and user prompts; _generate_content will split them.
-                    # Format: "[SYS]\n{system}\n[USR]\n{user}"
                     combined_prompt = f"[SYS]\n{_system_prompt}\n[USR]\n{user_prompt}"
                     f.update_record(table_prompt, record_id, {"总Prompt": combined_prompt})
                 else:
@@ -976,8 +1354,15 @@ class ContentGenerationHandler:
                 if g["type"] == "img":
                     img_count = g.get("img_per_piece", 4)
                     shotplan = self._lookup_shotplan("图片", content_type, category)
-                    master = self._build_image_master_prompt(strategy, sku_fields, scene)
-                    subs = self._build_image_sub_prompts(shotplan, scene, img_count)
+                            # Update brief with resolved shotplan_id for observability
+                    if brief and shotplan:
+                        brief["shotplan_id"] = shotplan.get("record_id", "")
+                    master = self._build_image_master_prompt(
+                        strategy, sku_fields, scene, persona=persona, brief=brief
+                    )
+                    subs = self._build_image_sub_prompts(
+                        shotplan, scene, img_count, persona=persona, brief=brief
+                    )
                     f.update_record(table_prompt, record_id, {
                         "总Prompt": master,
                         "子Prompt列表": json.dumps(subs, ensure_ascii=False),
@@ -993,6 +1378,31 @@ class ContentGenerationHandler:
                         logger.error("Prompt engine failed for %s: %s", pr["prompt_code"], exc)
                         generated = f"[生成失败: {exc}]"
                     f.update_record(table_prompt, record_id, {"总Prompt": generated})
+
+            # Write observability fields to 表3 (best-effort, non-blocking)
+            if brief:
+                try:
+                    ca = brief.get("consistency_anchor", {})
+                    brief_summary = " | ".join(x for x in [
+                        brief.get("persona_label", ""),
+                        brief.get("scene_mode", ""),
+                        brief.get("narrative_angle", ""),
+                    ] if x)
+                    obs_update: dict = {
+                        "创意包摘要": brief_summary or "(无)",
+                        "创意包JSON": json.dumps(brief, ensure_ascii=False),
+                        "命中策略ID": brief.get("strategy_id", ""),
+                        "命中场景ID": brief.get("scene_id", ""),
+                        "命中人设ID": brief.get("persona_id", ""),
+                        "命中ShotPlanID": brief.get("shotplan_id", ""),
+                        "标题句式": brief.get("title_pattern", ""),
+                        "叙事角度": brief.get("narrative_angle", ""),
+                        "一致性锚点": ca.get("person", ""),
+                        "是否兜底生成": "否" if brief.get("strategy_id") else "是",
+                    }
+                    f.update_record(table_prompt, record_id, obs_update)
+                except Exception:
+                    logger.debug("Failed to write observability fields to 表3 for %s", gid, exc_info=True)
 
     def _build_sku_summary(self, sku_fields: dict) -> str:
         f = self._feishu
@@ -1124,6 +1534,8 @@ class ContentGenerationHandler:
         content_record_ids = []
         task_type = cfg["task_type"]
         prior_titles: list[str] = []  # accumulate titles to prevent repetition across groups
+        briefs = cfg.get("_briefs", {})
+        persona_assignments = cfg.get("_persona_assignments", {})
 
         for g in groups:
             gid = g["group_id"]
@@ -1260,12 +1672,32 @@ class ContentGenerationHandler:
                     update["标题"] = title
                     update["正文"] = body
                     update["标签"] = tags_text
-                    # Save text locally
+                    # Save text locally + write debug/observability block to content.json
                     if self._storage:
                         try:
                             self._storage.update_text(plan_code, gid, title, body, tags_text)
+                            # Persist debug block with brief info
+                            _brief_g = briefs.get(gid, {})
+                            if _brief_g:
+                                _ca = _brief_g.get("consistency_anchor", {})
+                                debug_block = {
+                                    "brief_summary": " | ".join(x for x in [
+                                        _brief_g.get("persona_label", ""),
+                                        _brief_g.get("scene_mode", ""),
+                                        _brief_g.get("narrative_angle", ""),
+                                    ] if x),
+                                    "strategy_id":        _brief_g.get("strategy_id", ""),
+                                    "scene_id":           _brief_g.get("scene_id", ""),
+                                    "persona_id":         _brief_g.get("persona_id", ""),
+                                    "shotplan_id":        _brief_g.get("shotplan_id", ""),
+                                    "title_pattern":      _brief_g.get("title_pattern", ""),
+                                    "narrative_angle":    _brief_g.get("narrative_angle", ""),
+                                    "consistency_anchor": _ca.get("person", ""),
+                                    "failed_image_indexes": [],
+                                }
+                                self._storage.update_content_debug(plan_code, gid, debug_block)
                         except Exception:
-                            logger.warning("LocalStorage update_text failed for %s", gid, exc_info=True)
+                            logger.warning("LocalStorage update_text/debug failed for %s", gid, exc_info=True)
                     # Write text to Feishu immediately (don't wait for images)
                     try:
                         f.update_record(table_content, content_record_id, {
@@ -1352,6 +1784,13 @@ class ContentGenerationHandler:
                         except Exception as exc:
                             failed_count += 1
                             logger.warning("Image %d failed for %s: %s", idx+1, gid, exc)
+                            # Track failed index for debug block
+                            _brief_g = briefs.get(gid, {})
+                            if _brief_g and self._storage:
+                                try:
+                                    self._storage.append_failed_image_index(plan_code, gid, idx)
+                                except Exception:
+                                    pass
 
                     if not fail_reason and not attachment_tokens:
                         fail_reason = f"图片生成全部失败（{img_count}张）"
@@ -1387,6 +1826,27 @@ class ContentGenerationHandler:
                 update["失败原因"] = fail_reason
             else:
                 update["生成状态"] = "已生成"
+
+            # Write observability fields to 表4 (best-effort, non-blocking)
+            brief = briefs.get(gid, {})
+            if brief:
+                try:
+                    ca = brief.get("consistency_anchor", {})
+                    brief_summary = " | ".join(x for x in [
+                        brief.get("persona_label", ""),
+                        brief.get("scene_mode", ""),
+                        brief.get("narrative_angle", ""),
+                    ] if x)
+                    update["创意包摘要"]    = brief_summary or "(无)"
+                    update["命中策略ID"]    = brief.get("strategy_id", "")
+                    update["命中场景ID"]    = brief.get("scene_id", "")
+                    update["命中人设ID"]    = brief.get("persona_id", "")
+                    update["命中ShotPlanID"] = brief.get("shotplan_id", "")
+                    update["标题句式"]      = brief.get("title_pattern", "")
+                    update["叙事角度"]      = brief.get("narrative_angle", "")
+                    update["组内一致性锚点"] = ca.get("person", "")
+                except Exception:
+                    logger.debug("Failed to build observability fields for 表4, group=%s", gid, exc_info=True)
 
             f.update_record(table_content, content_record_id, update)
             db.update_content_status(

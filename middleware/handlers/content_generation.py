@@ -625,6 +625,8 @@ class ContentGenerationHandler:
         content_type: str,
         group_type: str = "img",
         scene: dict | None = None,
+        group_index: int = 1,
+        total_groups: int = 1,
     ) -> tuple[str, str]:
         """Build (system_prompt, user_prompt) using a Strategy record from 表8."""
         f = self._feishu
@@ -670,12 +672,29 @@ class ContentGenerationHandler:
             f"<标题（≤20字）>\n参考方向：{title_guide}" if title_guide else "<标题（≤20字）>"
         )
 
+        # Diversity instruction: tell the LLM which piece this is so it varies structure
+        diversity_block = ""
+        if total_groups > 1:
+            _title_patterns = [
+                "疑问句式（如：为什么我…？）",
+                "数字/对比句式（如：买了X件才发现…）",
+                "场景直述句式（如：健身/通勤/约会时…）",
+                "反转/意外句式（如：没想到一条链子竟然…）",
+                "情绪共鸣句式（如：那种感觉就是…）",
+            ]
+            this_pattern = _title_patterns[(group_index - 1) % len(_title_patterns)]
+            diversity_block = (
+                f"\n\n⚠️ 差异化要求：这是本产品第 {group_index} 篇笔记（共 {total_groups} 篇）。"
+                f"标题请采用「{this_pattern}」，叙事切入角度必须与其他篇次明显区分，"
+                f"禁止重复相同的开头句式或叙事骨架。"
+            )
+
         user = (
             f"请为以下产品生成「{content_type}」类型的完整内容（标题+正文）。\n\n"
             f"目标平台：{platform_str}\n"
             f"内容类型：{content_type}\n\n"
             f"产品信息：\n{sku_summary}{scene_block}\n\n"
-            f"叙事结构（请按顺序展开）：\n{node_lines}\n\n"
+            f"叙事结构（请按顺序展开）：\n{node_lines}{diversity_block}\n\n"
             f"输出格式：\n【标题】\n{title_instruction}\n\n【正文】\n<正文（{word_count}）>"
         )
         return system, user
@@ -907,6 +926,11 @@ class ContentGenerationHandler:
         if scene_assignments is None:
             scene_assignments = {}
 
+        # Pre-compute ordered list of C-suffix records for group_index tracking
+        c_suffix_records = [pr for pr in prompt_records if pr["suffix"] == "C"]
+        total_c_groups = len(c_suffix_records)
+        c_group_index_map = {pr["group"]["group_id"]: i + 1 for i, pr in enumerate(c_suffix_records)}
+
         for pr in prompt_records:
             g = pr["group"]
             suffix = pr["suffix"]
@@ -923,8 +947,10 @@ class ContentGenerationHandler:
                     content_type, platforms[0] if platforms else "", category
                 )
                 if strategy:
+                    _group_index = c_group_index_map.get(gid, 1)
                     _system_prompt, user_prompt = self._build_text_prompts_from_strategy(
-                        strategy, sku_summary, platforms, content_type, g["type"], scene=scene
+                        strategy, sku_summary, platforms, content_type, g["type"], scene=scene,
+                        group_index=_group_index, total_groups=total_c_groups,
                     )
                     # Store both system and user prompts; _generate_content will split them.
                     # Format: "[SYS]\n{system}\n[USR]\n{user}"
@@ -1096,6 +1122,7 @@ class ContentGenerationHandler:
 
         content_record_ids = []
         task_type = cfg["task_type"]
+        prior_titles: list[str] = []  # accumulate titles to prevent repetition across groups
 
         for g in groups:
             gid = g["group_id"]
@@ -1219,8 +1246,15 @@ class ContentGenerationHandler:
                         system_for_generation = c_system_prompt + "\n\n" + _BASE_SYSTEM
                     else:
                         system_for_generation = _BASE_SYSTEM
+                    # Inject anti-repetition context: tell the LLM which titles already exist
+                    if prior_titles:
+                        prior_block = "\n".join(f"  - {t}" for t in prior_titles)
+                        system_for_generation += (
+                            f"\n\n⚠️ 本批次已生成以下标题，新内容的标题句式和叙事角度必须与之明显不同，禁止复用相同的开头词或句型结构：\n{prior_block}"
+                        )
                     text_result = text_adapter.complete(system_for_generation, c_prompt_text)
                     title, body, _ = self._parse_text_result(text_result)
+                    prior_titles.append(title)  # track for subsequent groups
                     tags_text = " ".join(tags) if tags else ""
                     update["标题"] = title
                     update["正文"] = body
@@ -1281,6 +1315,14 @@ class ContentGenerationHandler:
                     # Generate, upload, and save each image immediately (don't batch)
                     is_nanobanana = hasattr(img_adapter, "generate_sequential")
                     for idx in range(img_count):
+                        img_filename = f"img_{idx+1:02d}.jpg"
+                        # Skip images already saved locally (handles partial-failure retry)
+                        if self._storage:
+                            local_img = self._storage.get_content_path(plan_code, gid) / img_filename
+                            if local_img.exists():
+                                logger.info("Image %d already saved locally for %s, skipping", idx+1, gid)
+                                attachment_tokens.append(f"__local__{img_filename}")
+                                continue
                         sub_p = sub_prompts[idx]
                         try:
                             if is_nanobanana:
@@ -1300,7 +1342,7 @@ class ContentGenerationHandler:
                                 logger.warning("Image %d upload returned no token for %s", idx+1, gid)
                             if self._storage and img_bytes:
                                 try:
-                                    self._storage.add_file(plan_code, gid, f"img_{idx+1:02d}.jpg", img_bytes)
+                                    self._storage.add_file(plan_code, gid, img_filename, img_bytes)
                                     logger.info("Image %d saved locally for %s", idx+1, gid)
                                 except Exception:
                                     logger.error("LocalStorage add_file failed for img %d of %s", idx+1, gid, exc_info=True)
@@ -1311,7 +1353,7 @@ class ContentGenerationHandler:
                     if not fail_reason and not attachment_tokens:
                         fail_reason = f"图片生成全部失败（{img_count}张）"
                     elif not fail_reason and failed_count > 0:
-                        update["失败原因"] = f"部分图片失败：{failed_count}/{img_count} 张未生成"
+                        fail_reason = f"部分图片失败：{failed_count}/{img_count} 张未生成"
                 else:
                     # --- Generate video ---
                     try:

@@ -845,9 +845,10 @@ class ContentGenerationHandler:
             posture   = scene.get("姿态倾向", "").strip()
             person_attrs = "、".join(x for x in [gender, age, appear, posture] if x)
             person_suffix = f"，画面中有{person_type}" + (f"（{person_attrs}）" if person_attrs else "")
-            # Consistency anchor: all shots in the same group must feature the identical person
+            # Consistency anchor: include fixed appearance description (without posture, which varies per shot)
+            appearance_anchor = "、".join(x for x in [gender, age, appear] if x)
             consistency_note = (
-                "，【一致性约束】本组所有图片为同一人物："
+                f"，【一致性约束】本组所有图片为同一人物（{appearance_anchor}）："
                 "保持完全相同的服装（颜色/款式/细节）、相同发型、相同面孔特征，禁止更换服装或人物"
             )
         else:
@@ -1325,11 +1326,13 @@ class ContentGenerationHandler:
                                 continue
                         sub_p = sub_prompts[idx]
                         try:
+                            # Always combine master prompt + sub-prompt so consistency
+                            # constraints and person description reach every image call
+                            combined = f"{i_prompt_text}\n\n---\n\n{sub_p}"
                             if is_nanobanana:
-                                combined = f"{i_prompt_text}\n\n---\n\n{sub_p}"
                                 img_bytes = img_adapter.generate(combined, ref_images=ref_images or None)
                             else:
-                                img_bytes = img_adapter.generate(sub_p)
+                                img_bytes = img_adapter.generate(combined)
                             logger.info("Image %d/%d generated (%d bytes) for %s", idx+1, img_count, len(img_bytes), gid)
                             token = self._upload_attachment(
                                 table_content, content_record_id,

@@ -32,6 +32,7 @@ Status flow (content.json "status" field):
   generated → review_passed → queued → published → [archived to archive/]
                                      ↘ publish_failed  (Pending_Content 保留，可重试)
 """
+from __future__ import annotations
 import json
 import logging
 import os

@@ -6,6 +6,7 @@ chat completions, so they share one adapter base class.
 
 Image and video models use provider-specific httpx calls.
 """
+from __future__ import annotations
 import asyncio
 import base64
 import logging

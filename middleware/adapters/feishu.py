@@ -2,6 +2,7 @@
 Feishu Bitable read/write client for the middleware.
 Wraps lark-oapi SDK for record CRUD operations.
 """
+from __future__ import annotations
 import os
 import logging
 from typing import Any

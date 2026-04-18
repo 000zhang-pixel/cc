@@ -9,6 +9,7 @@ setup_v2_schema.py — 飞书 Bitable 字段批量创建脚本（Prompt System U
 运行：
   cd middleware && python scripts/setup_v2_schema.py
 """
+from __future__ import annotations
 import sys
 import os
 import re

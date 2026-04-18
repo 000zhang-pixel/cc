@@ -2,6 +2,7 @@
 PublishRecordCreatorHandler — when 表4 审核状态 = 已通过,
 auto-create a 表5 发布执行表 record (first-time only).
 """
+from __future__ import annotations
 import logging
 from datetime import datetime
 

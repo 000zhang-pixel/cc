@@ -20,6 +20,7 @@ Workspace layout (read directly, no copying):
   - "得物自动发布"                 → same (legacy compat)
   - 其他任何非待定值               → 手动发布占位（仅写 已发布 状态）
 """
+from __future__ import annotations
 import logging
 import os
 import subprocess

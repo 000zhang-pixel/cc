@@ -23,6 +23,23 @@
 
 ---
 
+## Python 版本要求
+
+- **最低要求**：Python 3.9（通过 `from __future__ import annotations` 兼容 `X | Y` 联合类型注解）
+- **推荐版本**：Python 3.11+（所有测试和验证脚本均在 3.11 环境开发）
+- **验证命令**：统一使用 `python`，避免 `python3` 指向 3.9 导致运行失败
+- **一键检查**：
+  ```bash
+  python --version   # 确认 >= 3.9
+  cd D:/AI-Content-Hub/middleware
+  python scripts/validate_handler_units.py
+  python scripts/validate_scene_variety.py
+  python scripts/validate_diff_strength.py
+  python scripts/validate_persona_path.py
+  ```
+
+---
+
 ## 项目概览
 
 - **路径**: `D:\AI-Content-Hub\`

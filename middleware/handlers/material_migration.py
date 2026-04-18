@@ -13,6 +13,7 @@ Renaming convention:
 
 Files are sorted by natural order (DSC001 < DSC002 < DSC010 < DSC100).
 """
+from __future__ import annotations
 import logging
 import re
 import shutil

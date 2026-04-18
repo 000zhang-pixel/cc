@@ -15,6 +15,7 @@ Full pipeline:
   11. Write results to 表4 内容生成表
   12. Update 表2 execution status
 """
+from __future__ import annotations
 import json
 import logging
 import random
@@ -753,12 +754,27 @@ class ContentGenerationHandler:
                 sc += int(f.get_number(prec, "优先级", 0)) / 200.0
                 return sc
 
+            def _tag_signal(prec: dict, content_type: str, scene_dict: dict) -> float:
+                """Score without the priority tiebreaker — used to detect zero-signal assignments."""
+                return _soft_score(prec, content_type, scene_dict) - int(f.get_number(prec, "优先级", 0)) / 200.0
+
             if persona_mode == "固定主人设":
                 # Pick persona with best aggregate fit across all groups
                 best = max(persona_pool, key=lambda r: sum(
                     _soft_score(r, g.get("content_type", ""), scene_assignments.get(g["group_id"], {}))
                     for g in groups
                 ))
+                # Warn if best persona has no tag signal across any group
+                _best_signal = max(
+                    _tag_signal(best, g.get("content_type", ""), scene_assignments.get(g["group_id"], {}))
+                    for g in groups
+                )
+                if _best_signal < 0.001:
+                    logger.warning(
+                        "_assign_personas [固定主人设]: zero tag signal — selected %s by priority only; "
+                        "consider adding 适合人设标签/人设适配标签 config",
+                        f.get_text(best, "人设编号"),
+                    )
                 for g in groups:
                     assignments[g["group_id"]] = self._extract_persona_fields(best)
             else:
@@ -773,6 +789,13 @@ class ContentGenerationHandler:
                     chosen = max(candidates, key=lambda r: _soft_score(r, content_type, scene_dict))
                     assignments[gid] = self._extract_persona_fields(chosen)
                     _used_rec_ids.add(chosen.get("record_id"))
+                    # Warn if chosen persona has no tag signal (selected purely by priority)
+                    if _tag_signal(chosen, content_type, scene_dict) < 0.001:
+                        logger.warning(
+                            "_assign_personas [%s]: zero tag signal for group %s (content_type=%r) — "
+                            "selected %s by priority only; consider adding 适合人设标签/人设适配标签 config",
+                            persona_mode, gid, content_type, f.get_text(chosen, "人设编号"),
+                        )
         else:
             # Fallback: derive pseudo-persona from Scene person fields
             for g in groups:

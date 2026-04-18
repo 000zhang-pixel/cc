@@ -143,7 +143,7 @@ class ContentGenerationHandler:
                 logger.warning("Failed to save plan.json, continuing", exc_info=True)
 
         # --- 5b. Assign scenes to groups (merges into plan.json) ---
-        scene_assignments = self._assign_scenes(groups, sku_fields, plan_code)
+        scene_assignments = self._assign_scenes(groups, sku_fields, plan_code, cfg.get("scene_variety", "中"))
 
         # --- 5c. Lookup persona per group & build Creative Briefs ---
         # Inject category into cfg so Brief builder can access it without extra lookup
@@ -163,7 +163,14 @@ class ContentGenerationHandler:
 
         # --- 7. Generate Prompts via Prompt engine ---
         text_adapter = build_text_adapter(cfg["text_model_name"], self._model_params)
-        self._fill_prompts(prompt_records, sku_fields, cfg, tags, text_adapter, scene_assignments, briefs)
+        self._fill_prompts(prompt_records, sku_fields, cfg, tags, text_adapter, scene_assignments, briefs, persona_assignments)
+
+        # P0-2: Re-persist briefs now that _fill_prompts has resolved strategy_id + shotplan_id
+        if self._storage:
+            try:
+                self._storage.update_plan(plan_code, {"briefs": briefs})
+            except Exception:
+                logger.warning("Failed to re-write briefs to plan.json after _fill_prompts", exc_info=True)
 
         # --- 8. Mark all prompts 已确认 ---
         for pr in prompt_records:
@@ -580,10 +587,15 @@ class ContentGenerationHandler:
         return matched
 
     def _assign_scenes(
-        self, groups: list[dict], sku_fields: dict, plan_code: str
+        self, groups: list[dict], sku_fields: dict, plan_code: str,
+        scene_variety: str = "中",
     ) -> dict:
         """
         Assign one distinct Scene per group (best-effort round-robin if scenes < groups).
+        scene_variety:
+          低 → step=1 (current behavior, tighter spread)
+          中 → step=1 (same as 低, default)
+          高 → step=2 (skip-one spread to maximize scene diversity across groups)
         Writes assignments to plan.json["scene_assignments"] and returns the dict.
         Format: {group_id: {scene_id, scene_record_id, 场景基底_英文, 风格基调词, 排除描述}}
         """
@@ -604,10 +616,12 @@ class ContentGenerationHandler:
             pool.extend(r for _, r in tier)
 
         # Random start offset so the first group doesn't always get the top-weighted scene
+        # scene_variety=高 uses step=2 to maximize spread; 中/低 use step=1
+        _scene_step = 2 if scene_variety == "高" else 1
         start = random.randrange(len(pool))
         assignments: dict = {}
         for i, g in enumerate(groups):
-            scene = pool[(start + i) % len(pool)]
+            scene = pool[(start + i * _scene_step) % len(pool)]
             assignments[g["group_id"]] = {
                 "scene_id":        f.get_text(scene, "场景编号"),
                 "scene_record_id": scene["record_id"],
@@ -778,8 +792,14 @@ class ContentGenerationHandler:
         total_img = len(img_groups)
 
         # Differentiation strength → how far apart narrative angles / structure modes spread
-        diff_strength = cfg.get("diff_strength", "中")
-        # scene_variety hints whether to pick very different scenes (already done by _assign_scenes)
+        diff_strength        = cfg.get("diff_strength", "中")
+        consistency_strength = cfg.get("consistency_strength", "强")
+
+        # Rotation step per diff_strength:
+        #   低 → step=0: all groups share the same pattern/angle (minimal differentiation)
+        #   中 → step=1: sequential round-robin (current default)
+        #   高 → step=2: skip-one spread (0,2,4,1,3…) for stronger differentiation
+        _diff_step = {"低": 0, "中": 1, "高": 2}.get(diff_strength, 1)
 
         briefs: dict = {}
         for i, g in enumerate(groups):
@@ -791,9 +811,10 @@ class ContentGenerationHandler:
             # Rotate title pattern per group (img groups only; vid groups inherit index 0)
             if g["type"] == "img":
                 group_idx = img_groups.index(g)   # 0-based
-                title_pattern = self._TITLE_PATTERNS[group_idx % len(self._TITLE_PATTERNS)]
-                narrative_angle = self._NARRATIVE_ANGLES[group_idx % len(self._NARRATIVE_ANGLES)]
-                structure_mode  = self._STRUCTURE_MODES[group_idx % len(self._STRUCTURE_MODES)]
+                _step = _diff_step
+                title_pattern   = self._TITLE_PATTERNS[(group_idx * _step) % len(self._TITLE_PATTERNS)]
+                narrative_angle = self._NARRATIVE_ANGLES[(group_idx * _step) % len(self._NARRATIVE_ANGLES)]
+                structure_mode  = self._STRUCTURE_MODES[(group_idx * _step) % len(self._STRUCTURE_MODES)]
             else:
                 title_pattern   = self._TITLE_PATTERNS[0]
                 narrative_angle = self._NARRATIVE_ANGLES[0]
@@ -848,7 +869,8 @@ class ContentGenerationHandler:
                     "product": "同一颜色、同一材质、同一挂接方式",
                     "style":   "统一光线、统一色温、统一画面风格",
                 },
-                "diff_strength":      diff_strength,
+                "diff_strength":          diff_strength,
+                "consistency_strength":   consistency_strength,
             }
             logger.info(
                 "_build_creative_briefs: group=%s title_pattern=%r narrative_angle=%r persona=%r scene=%s",
@@ -881,6 +903,14 @@ class ContentGenerationHandler:
         system = f.get_text(strategy, "系统提示词前缀").strip() or (
             "你是一名专业的电商种草文案策划，擅长为得物/小红书平台创作高转化率内容。"
         )
+
+        # P1-2: Inject 正文禁忌 into system prompt if configured (best-effort, field may not exist)
+        try:
+            forbidden_text = f.get_text(strategy, "正文禁忌").strip()
+            if forbidden_text:
+                system += f"\n\n【正文禁忌】以下表达绝对禁止出现：{forbidden_text}"
+        except Exception:
+            pass
         nodes_raw = f.get_text(strategy, "文案叙事节点").strip()
         try:
             nodes = json.loads(nodes_raw) if nodes_raw else []
@@ -939,8 +969,10 @@ class ContentGenerationHandler:
         # 1. From Brief (preferred — already rotated by _build_creative_briefs)
         # 2. From Strategy 标题句式池 (table-configured pool)
         # 3. From hardcoded _TITLE_PATTERNS (legacy fallback)
+        #
+        # P1-2: When no Brief, prefer Strategy 叙事角度标签/结构模式 over empty defaults
         if brief:
-            this_pattern = brief.get("title_pattern") or self._TITLE_PATTERNS[(group_index - 1) % len(self._TITLE_PATTERNS)]
+            this_pattern    = brief.get("title_pattern") or self._TITLE_PATTERNS[(group_index - 1) % len(self._TITLE_PATTERNS)]
             narrative_angle = brief.get("narrative_angle", "")
             structure_mode  = brief.get("structure_mode", "")
         else:
@@ -948,8 +980,17 @@ class ContentGenerationHandler:
                 this_pattern = title_pool[(group_index - 1) % len(title_pool)]
             else:
                 this_pattern = self._TITLE_PATTERNS[(group_index - 1) % len(self._TITLE_PATTERNS)]
-            narrative_angle = ""
-            structure_mode  = ""
+            # Try Strategy 叙事角度标签 (multi-select) → pick one by round-robin
+            try:
+                strategy_angles = f.get_options(strategy, "叙事角度标签") or []
+                narrative_angle = strategy_angles[(group_index - 1) % len(strategy_angles)] if strategy_angles else ""
+            except Exception:
+                narrative_angle = ""
+            # Try Strategy 结构模式 (single-select)
+            try:
+                structure_mode = f.get_option(strategy, "结构模式") or ""
+            except Exception:
+                structure_mode = ""
 
         title_instruction = (
             f"<标题（≤20字）>\n参考方向：{title_guide}" if title_guide else "<标题（≤20字）>"
@@ -986,14 +1027,19 @@ class ContentGenerationHandler:
                 diversity_block += "，叙事切入角度必须与其他篇次明显区分，禁止重复相同的开头句式或叙事骨架。"
 
         # Optional persona context in text (adds persona feeling to scene description)
+        # P1-3: prefer prompt_template as the authoritative persona description
         persona_block = ""
         if persona:
-            pa = persona.get("appearance", "")
-            ps = persona.get("style", "")
-            pq = "、".join(persona.get("qi_zhi_tags") or [])
-            persona_parts = [x for x in [pa, ps, pq] if x]
-            if persona_parts:
-                persona_block = f"\n\n人物感觉参考：{', '.join(persona_parts)}，使用时请自然地将此人物形象融入场景叙事中。"
+            _pt = persona.get("prompt_template", "").strip()
+            if _pt:
+                persona_block = f"\n\n人物感觉参考（请将此人物形象自然融入场景叙事中）：{_pt}"
+            else:
+                pa = persona.get("appearance", "")
+                ps = persona.get("style", "")
+                pq = "、".join(persona.get("qi_zhi_tags") or [])
+                persona_parts = [x for x in [pa, ps, pq] if x]
+                if persona_parts:
+                    persona_block = f"\n\n人物感觉参考：{', '.join(persona_parts)}，使用时请自然地将此人物形象融入场景叙事中。"
 
         user = (
             f"请为以下产品生成「{content_type}」类型的完整内容（标题+正文）。\n\n"
@@ -1052,7 +1098,9 @@ class ContentGenerationHandler:
         exclude     = scene.get("排除描述", "").strip()
 
         # Person fields — prefer Persona table, fallback to Scene
+        # P1-3: If Persona has prompt_template, use it as the full person description
         person_type = scene.get("人物类型", "").strip()
+        _persona_prompt_template = (persona or {}).get("prompt_template", "").strip()
         if persona:
             gender     = persona.get("gender", "").strip() or scene.get("性别倾向", "").strip()
             age_range  = persona.get("age", "").strip()    or scene.get("年龄段", "").strip()
@@ -1092,11 +1140,15 @@ class ContentGenerationHandler:
 
         person_part: list[str] = []
         if person_type and person_type not in ("无人物",):
-            person_attrs = [x for x in [gender, age_range, appearance, posture] if x]
-            person_line = person_type
-            if person_attrs:
-                person_line += "，" + "，".join(person_attrs)
-            person_part = ["", f"【人物】{person_line}"]
+            if _persona_prompt_template:
+                # P1-3: prompt_template is the authoritative full description — use directly
+                person_part = ["", f"【人物】{_persona_prompt_template}"]
+            else:
+                person_attrs = [x for x in [gender, age_range, appearance, posture] if x]
+                person_line = person_type
+                if person_attrs:
+                    person_line += "，" + "，".join(person_attrs)
+                person_part = ["", f"【人物】{person_line}"]
 
         # Consistency anchor: use Persona consistency_template if present (richer description)
         persona_consistency = ""
@@ -1109,6 +1161,7 @@ class ContentGenerationHandler:
             if ca.get("person"):
                 persona_consistency = ca["person"]
 
+        consistency_strength = (brief or {}).get("consistency_strength", "强")
         consistency_lines = [
             "",
             "【一致性要求】",
@@ -1119,6 +1172,11 @@ class ContentGenerationHandler:
         else:
             consistency_lines.append("- 同一人物（同一人、同套服装、同款发型）")
         consistency_lines.append("- 统一光线和色彩风格贯穿始终")
+        if consistency_strength == "强":
+            consistency_lines.append(
+                "- 【强一致性】人物面孔特征、发型、服装颜色/款式/细节禁止在不同图片间出现任何漂移或变化，"
+                "产品颜色/材质/挂接方式必须完全一致，禁止换人、换装、换发型"
+            )
         consistency_part = consistency_lines
 
         # Optional sections, dropped first when over budget
@@ -1175,9 +1233,11 @@ class ContentGenerationHandler:
 
         # Build person suffix for shots that should include real people
         # Persona source (preferred) → Scene fallback
+        # P1-3: use prompt_template as the authoritative person description when available
         person_type = scene.get("人物类型", "").strip()
         _no_person_types = {"无人物", "纯产品", ""}
         if person_type and person_type not in _no_person_types:
+            _sub_prompt_template = (persona or {}).get("prompt_template", "").strip()
             if persona:
                 gender  = persona.get("gender", "").strip() or scene.get("性别倾向", "").strip()
                 age     = persona.get("age", "").strip()    or scene.get("年龄段", "").strip()
@@ -1189,20 +1249,28 @@ class ContentGenerationHandler:
                 appear  = scene.get("外貌风格", "").strip()
                 posture = scene.get("姿态倾向", "").strip()
 
-            person_attrs = "、".join(x for x in [gender, age, appear, posture] if x)
-            person_suffix = f"，画面中有{person_type}" + (f"（{person_attrs}）" if person_attrs else "")
+            if _sub_prompt_template:
+                person_suffix = f"，画面中有{person_type}（{_sub_prompt_template}）"
+            else:
+                person_attrs = "、".join(x for x in [gender, age, appear, posture] if x)
+                person_suffix = f"，画面中有{person_type}" + (f"（{person_attrs}）" if person_attrs else "")
 
             # Consistency anchor — prefer Persona consistency_template; else build from appearance
             appearance_anchor = "、".join(x for x in [gender, age, appear] if x)
             if persona and persona.get("consistency_template"):
-                consistency_note = f"，【一致性约束】{persona['consistency_template']}"
+                _anchor_text = persona["consistency_template"]
             elif brief and brief.get("consistency_anchor", {}).get("person"):
-                consistency_note = f"，【一致性约束】{brief['consistency_anchor']['person']}"
+                _anchor_text = brief["consistency_anchor"]["person"]
             else:
-                consistency_note = (
-                    f"，【一致性约束】本组所有图片为同一人物（{appearance_anchor}）："
+                _anchor_text = (
+                    f"本组所有图片为同一人物（{appearance_anchor}）："
                     "保持完全相同的服装（颜色/款式/细节）、相同发型、相同面孔特征，禁止更换服装或人物"
                 )
+            # consistency_strength=强 appends a hard drift-prohibition clause
+            _cs = (brief or {}).get("consistency_strength", "强")
+            if _cs == "强":
+                _anchor_text += "；人物面孔/发型/服装禁止漂移，产品细节禁止变化"
+            consistency_note = f"，【一致性约束】{_anchor_text}"
         else:
             person_suffix = ""
             consistency_note = ""
@@ -1220,10 +1288,17 @@ class ContentGenerationHandler:
             except Exception:
                 pass
 
+        # Build constraint suffix combining action_variety + no_repeat_shots (P1-1)
+        _constraint_parts = []
+        if action_variety:
+            _constraint_parts.append(f"动作变化：{action_variety}")
+        if no_repeat_shots:
+            _constraint_parts.append(f"禁止重复：{no_repeat_shots}")
+        _constraint_suffix = f"，【构图约束】{'；'.join(_constraint_parts)}" if _constraint_parts else ""
+
         def _default_shot(idx: int) -> str:
             role = self._DEFAULT_SHOT_ROLES[idx % len(self._DEFAULT_SHOT_ROLES)]
-            no_repeat_suffix = f"，【构图约束】{no_repeat_shots}" if no_repeat_shots else ""
-            return f"第{idx + 1}张：{role}{scene_suffix}{person_suffix}{consistency_note}{no_repeat_suffix}"
+            return f"第{idx + 1}张：{role}{scene_suffix}{person_suffix}{consistency_note}{_constraint_suffix}"
 
         if shotplan is None:
             return [_default_shot(i) for i in range(img_count)]
@@ -1263,8 +1338,7 @@ class ContentGenerationHandler:
                 zh_text = zh_text.replace("{scene_description}", scene_zh)
                 effective_scene_suffix = "" if had_placeholder else scene_suffix
                 if zh_text:
-                    no_repeat_suffix = f"，【构图约束】{no_repeat_shots}" if no_repeat_shots else ""
-                    result.append(f"第{i + 1}张：{zh_text}{effective_scene_suffix}{person_suffix}{consistency_note}{no_repeat_suffix}")
+                    result.append(f"第{i + 1}张：{zh_text}{effective_scene_suffix}{person_suffix}{consistency_note}{_constraint_suffix}")
                 else:
                     result.append(_default_shot(i))
             else:
@@ -1731,6 +1805,8 @@ class ContentGenerationHandler:
 
                     attachment_tokens = []
                     failed_count = 0
+                    _image_prompts: list[str] = []      # P1-4: accumulate per-image prompts
+                    _image_failures: list[dict] = []    # P1-4: accumulate per-image failures
 
                     # Fetch 白底图 as reference image (Nanobanana only)
                     ref_images: list[bytes] = []
@@ -1757,10 +1833,11 @@ class ContentGenerationHandler:
                                 attachment_tokens.append(f"__local__{img_filename}")
                                 continue
                         sub_p = sub_prompts[idx]
+                        combined = f"{i_prompt_text}\n\n---\n\n{sub_p}"
+                        _image_prompts.append(combined)   # P1-4: record prompt for debug
                         try:
                             # Always combine master prompt + sub-prompt so consistency
                             # constraints and person description reach every image call
-                            combined = f"{i_prompt_text}\n\n---\n\n{sub_p}"
                             if is_nanobanana:
                                 img_bytes = img_adapter.generate(combined, ref_images=ref_images or None)
                             else:
@@ -1784,6 +1861,7 @@ class ContentGenerationHandler:
                         except Exception as exc:
                             failed_count += 1
                             logger.warning("Image %d failed for %s: %s", idx+1, gid, exc)
+                            _image_failures.append({"index": idx, "error": str(exc)})  # P1-4
                             # Track failed index for debug block
                             _brief_g = briefs.get(gid, {})
                             if _brief_g and self._storage:
@@ -1796,6 +1874,16 @@ class ContentGenerationHandler:
                         fail_reason = f"图片生成全部失败（{img_count}张）"
                     elif not fail_reason and failed_count > 0:
                         fail_reason = f"部分图片失败：{failed_count}/{img_count} 张未生成"
+
+                    # P1-4: Write image_prompts + image_failures to content.json debug block
+                    if self._storage and (_image_prompts or _image_failures):
+                        try:
+                            self._storage.update_content_debug(plan_code, gid, {
+                                "image_prompts":  _image_prompts,
+                                "image_failures": _image_failures,
+                            })
+                        except Exception:
+                            logger.debug("Failed to write image debug info for %s", gid, exc_info=True)
                 else:
                     # --- Generate video ---
                     try:

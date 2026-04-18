@@ -615,13 +615,29 @@ class ContentGenerationHandler:
             random.shuffle(tier)
             pool.extend(r for _, r in tier)
 
-        # Random start offset so the first group doesn't always get the top-weighted scene
-        # scene_variety=高 uses step=2 to maximize spread; 中/低 use step=1
-        _scene_step = 2 if scene_variety == "高" else 1
+        # Build ordered scene sequence according to scene_variety:
+        #   低/中 → sequential round-robin (start at random offset)
+        #   高    → maximize uniqueness:
+        #             • if pool >= groups: each group gets a distinct scene (no repeats)
+        #             • if pool < groups: re-shuffle pool each full cycle to avoid
+        #               step-size collision that could make all groups hit same scene
         start = random.randrange(len(pool))
+        if scene_variety == "高":
+            n = len(pool)
+            if n >= len(groups):
+                scene_seq = [pool[(start + j) % n] for j in range(len(groups))]
+            else:
+                scene_seq: list = []
+                while len(scene_seq) < len(groups):
+                    chunk = pool[:]
+                    random.shuffle(chunk)
+                    scene_seq.extend(chunk)
+                scene_seq = scene_seq[:len(groups)]
+        else:
+            scene_seq = [pool[(start + i) % len(pool)] for i in range(len(groups))]
+
         assignments: dict = {}
-        for i, g in enumerate(groups):
-            scene = pool[(start + i * _scene_step) % len(pool)]
+        for g, scene in zip(groups, scene_seq):
             assignments[g["group_id"]] = {
                 "scene_id":        f.get_text(scene, "场景编号"),
                 "scene_record_id": scene["record_id"],
@@ -642,6 +658,9 @@ class ContentGenerationHandler:
                 "色温":            f.get_option(scene, "色温"),
                 "景深感":          f.get_option(scene, "景深感"),
                 "镜头感":          f.get_option(scene, "镜头感"),
+                # New optional v2 fields — needed by prompt builders and persona soft-match
+                "道具建议":        f.get_text(scene, "道具建议"),
+                "适合人设标签":    f.get_options(scene, "适合人设标签") or [],
             }
 
         if self._storage:
@@ -692,18 +711,41 @@ class ContentGenerationHandler:
         assignments: dict = {}
 
         if persona_pool:
-            # Determine which persona to use per group
+            # Soft-match scoring: content-type fit + scene↔persona tag overlap + priority tiebreaker
+            def _soft_score(prec: dict, content_type: str, scene_dict: dict) -> float:
+                sc = 0.0
+                # +2 if persona supports the group's content type
+                ctypes = f.get_options(prec, "适用内容类型") or []
+                if content_type in ctypes:
+                    sc += 2.0
+                # +1 per scene 适合人设标签 that overlaps with persona 气质标签
+                scene_tags = set(scene_dict.get("适合人设标签") or [])
+                qi_zhi     = set(f.get_options(prec, "气质标签") or [])
+                sc += len(scene_tags & qi_zhi)
+                # priority as fractional tiebreaker (max ~200, so /200 keeps it < 1.0)
+                sc += int(f.get_number(prec, "优先级", 0)) / 200.0
+                return sc
+
             if persona_mode == "固定主人设":
-                # All groups share the top-priority persona
-                fixed = persona_pool[0]
+                # Pick persona with best aggregate fit across all groups
+                best = max(persona_pool, key=lambda r: sum(
+                    _soft_score(r, g.get("content_type", ""), scene_assignments.get(g["group_id"], {}))
+                    for g in groups
+                ))
                 for g in groups:
-                    assignments[g["group_id"]] = self._extract_persona_fields(fixed)
+                    assignments[g["group_id"]] = self._extract_persona_fields(best)
             else:
-                # 自动 / 多人设轮换: rotate through pool
-                start = random.randrange(len(persona_pool))
-                for i, g in enumerate(groups):
-                    persona = persona_pool[(start + i) % len(persona_pool)]
-                    assignments[g["group_id"]] = self._extract_persona_fields(persona)
+                # 自动 / 多人设轮换: best-fit per group, prefer variety (avoid reuse)
+                _used_ids: list = []
+                for g in groups:
+                    gid = g["group_id"]
+                    content_type = g.get("content_type", "")
+                    scene_dict   = scene_assignments.get(gid, {})
+                    # Prefer personas not yet assigned in this batch; fallback to full pool
+                    candidates = [r for r in persona_pool if id(r) not in _used_ids] or persona_pool
+                    chosen = max(candidates, key=lambda r: _soft_score(r, content_type, scene_dict))
+                    assignments[gid] = self._extract_persona_fields(chosen)
+                    _used_ids.append(id(chosen))
         else:
             # Fallback: derive pseudo-persona from Scene person fields
             for g in groups:
@@ -795,11 +837,18 @@ class ContentGenerationHandler:
         diff_strength        = cfg.get("diff_strength", "中")
         consistency_strength = cfg.get("consistency_strength", "强")
 
-        # Rotation step per diff_strength:
-        #   低 → step=0: all groups share the same pattern/angle (minimal differentiation)
-        #   中 → step=1: sequential round-robin (current default)
-        #   高 → step=2: skip-one spread (0,2,4,1,3…) for stronger differentiation
-        _diff_step = {"低": 0, "中": 1, "高": 2}.get(diff_strength, 1)
+        # Per-dimension rotation step per diff_strength:
+        #   低 → title rotates step=1 (avoids exact repetition), narrative/structure fixed at [0]
+        #         Rationale: avoid quality regression ("all titles identical") while keeping
+        #         narrative tone consistent across a low-differentiation batch.
+        #   中 → all dimensions rotate step=1 (sequential round-robin, current default)
+        #   高 → all dimensions rotate step=2 (skip-one spread; 2 is coprime with pool size 5)
+        if diff_strength == "高":
+            _title_step = _narrative_step = _structure_step = 2
+        elif diff_strength == "低":
+            _title_step, _narrative_step, _structure_step = 1, 0, 0
+        else:  # 中 or unknown
+            _title_step = _narrative_step = _structure_step = 1
 
         briefs: dict = {}
         for i, g in enumerate(groups):
@@ -811,10 +860,9 @@ class ContentGenerationHandler:
             # Rotate title pattern per group (img groups only; vid groups inherit index 0)
             if g["type"] == "img":
                 group_idx = img_groups.index(g)   # 0-based
-                _step = _diff_step
-                title_pattern   = self._TITLE_PATTERNS[(group_idx * _step) % len(self._TITLE_PATTERNS)]
-                narrative_angle = self._NARRATIVE_ANGLES[(group_idx * _step) % len(self._NARRATIVE_ANGLES)]
-                structure_mode  = self._STRUCTURE_MODES[(group_idx * _step) % len(self._STRUCTURE_MODES)]
+                title_pattern   = self._TITLE_PATTERNS[(group_idx * _title_step) % len(self._TITLE_PATTERNS)]
+                narrative_angle = self._NARRATIVE_ANGLES[(group_idx * _narrative_step) % len(self._NARRATIVE_ANGLES)]
+                structure_mode  = self._STRUCTURE_MODES[(group_idx * _structure_step) % len(self._STRUCTURE_MODES)]
             else:
                 title_pattern   = self._TITLE_PATTERNS[0]
                 narrative_angle = self._NARRATIVE_ANGLES[0]
@@ -1884,6 +1932,20 @@ class ContentGenerationHandler:
                             })
                         except Exception:
                             logger.debug("Failed to write image debug info for %s", gid, exc_info=True)
+
+                    # 表4: write image debug summary (摘要版, best-effort)
+                    try:
+                        _fail_count  = len(_image_failures)
+                        _fail_idxs   = [e["index"] + 1 for e in _image_failures]
+                        _prompt_prev = (_image_prompts[0][:120] + "…") if _image_prompts else ""
+                        _img_debug = f"失败:{_fail_count}/{img_count}张"
+                        if _fail_idxs:
+                            _img_debug += f" 失败序号:{_fail_idxs}"
+                        if _prompt_prev:
+                            _img_debug += f" Prompt摘要:{_prompt_prev}"
+                        update["图片生成调试信息"] = _img_debug
+                    except Exception:
+                        pass
                 else:
                     # --- Generate video ---
                     try:

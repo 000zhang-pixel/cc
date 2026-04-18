@@ -13,6 +13,7 @@ import sys
 import os
 import time
 import json
+from pathlib import Path
 
 # Fix Windows GBK stdout encoding
 if sys.stdout.encoding.lower() != "utf-8":
@@ -29,6 +30,7 @@ from lark_oapi.api.bitable.v1 import (
     AppTableFieldProperty,
     AppTableFieldPropertyOption,
     ListAppTableFieldRequest,
+    ListAppTableRecordRequest,
     BatchCreateAppTableRequest,
     BatchCreateAppTableRequestBody,
     CreateAppTableRecordRequest,
@@ -164,6 +166,7 @@ TABLE4_FIELDS = [
     _field("标题句式",     TEXT),
     _field("叙事角度",     TEXT),
     _field("组内一致性锚点", TEXT),
+    _field("图片生成调试信息", TEXT),  # 摘要版: 失败数/序号/Prompt前120字
 ]
 
 # 表8 — 内容策略表（strategy）
@@ -468,6 +471,23 @@ def setup_persona_table_fields(table_id: str):
     print(f"  → 新增 {added}，跳过 {skipped}，失败 {failed}")
 
 
+def count_persona_records(table_id: str) -> int:
+    """Return 0 if the table has no records, 1 if it has at least one.
+    Returns -1 on API error (treat as non-empty to avoid accidental re-seed)."""
+    rb = (
+        ListAppTableRecordRequest.builder()
+        .app_token(APP_TOKEN)
+        .table_id(table_id)
+        .page_size(1)
+        .build()
+    )
+    resp = client.bitable.v1.app_table_record.list(rb)
+    if not resp.success():
+        print(f"  ⚠ count_records [{resp.code}]: {resp.msg}")
+        return -1
+    return 1 if (resp.data.items or []) else 0
+
+
 def insert_persona_records(table_id: str):
     """录入 12 条初始人设记录。"""
     print(f"\n  录入 {len(PERSONA_RECORDS)} 条人设记录...")
@@ -513,11 +533,24 @@ def main():
     add_fields("表9 — ShotPlan (shotplan)",    TABLES["shotplan"], TABLE9_FIELDS)
     add_fields("表10 — 场景库 (scene)",        TABLES["scene"],    TABLE10_FIELDS)
 
-    # 2. 创建表12
+    # 2. 创建/检查表12
+    # Fix: use repo-relative path so script works on any machine / directory layout
+    _yaml_path = Path(__file__).resolve().parents[1] / "config" / "system.yaml"
+
     persona_table_id = TABLES.get("persona", "")
     if persona_table_id:
         print(f"\n  表12 已配置 table_id={persona_table_id}，跳过建表，直接补字段")
         setup_persona_table_fields(persona_table_id)
+        # Auto-seed: if table exists but has no records, write initial persona data
+        record_count = count_persona_records(persona_table_id)
+        if record_count == 0:
+            print("  表12 记录为空，自动录入初始人设数据...")
+            time.sleep(0.5)
+            insert_persona_records(persona_table_id)
+        elif record_count > 0:
+            print(f"  表12 已有记录，跳过 seed 录入")
+        else:
+            print("  表12 记录数检查失败，跳过 seed 录入（保守策略）")
     else:
         persona_table_id = create_persona_table()
         if persona_table_id:
@@ -526,15 +559,14 @@ def main():
             time.sleep(0.5)
             insert_persona_records(persona_table_id)
 
-            # 3. 写回 system.yaml
-            yaml_path = "D:/AI-Content-Hub/middleware/config/system.yaml"
-            with open(yaml_path, encoding="utf-8") as f_:
+            # 3. 写回 system.yaml（repo-relative path）
+            with open(_yaml_path, encoding="utf-8") as f_:
                 content = f_.read()
             content = content.replace(
                 'persona:      ""',
                 f'persona:      {persona_table_id}'
             )
-            with open(yaml_path, "w", encoding="utf-8") as f_:
+            with open(_yaml_path, "w", encoding="utf-8") as f_:
                 f_.write(content)
             print(f"\n  ✓ system.yaml 已更新 persona: {persona_table_id}")
         else:

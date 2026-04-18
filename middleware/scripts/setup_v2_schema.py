@@ -11,6 +11,7 @@ setup_v2_schema.py — 飞书 Bitable 字段批量创建脚本（Prompt System U
 """
 import sys
 import os
+import re
 import time
 import json
 from pathlib import Path
@@ -562,13 +563,19 @@ def main():
             # 3. 写回 system.yaml（repo-relative path）
             with open(_yaml_path, encoding="utf-8") as f_:
                 content = f_.read()
-            content = content.replace(
-                'persona:      ""',
-                f'persona:      {persona_table_id}'
+            # Use regex to tolerate any whitespace/quote variation around the empty value
+            new_content, n_subs = re.subn(
+                r'(persona:\s*)(["\']?\s*["\']?)\s*$',
+                rf'\g<1>{persona_table_id}',
+                content,
+                flags=re.MULTILINE,
             )
-            with open(_yaml_path, "w", encoding="utf-8") as f_:
-                f_.write(content)
-            print(f"\n  ✓ system.yaml 已更新 persona: {persona_table_id}")
+            if n_subs == 0:
+                print(f"\n  ⚠ system.yaml 中未找到空 persona 条目，请手动更新 persona: {persona_table_id}")
+            else:
+                with open(_yaml_path, "w", encoding="utf-8") as f_:
+                    f_.write(new_content)
+                print(f"\n  ✓ system.yaml 已更新 persona: {persona_table_id}")
         else:
             print("\n  ✗ 建表失败，跳过人设录入")
 

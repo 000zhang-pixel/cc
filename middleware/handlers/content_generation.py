@@ -659,6 +659,7 @@ class ContentGenerationHandler:
                 "景深感":          f.get_option(scene, "景深感"),
                 "镜头感":          f.get_option(scene, "镜头感"),
                 # New optional v2 fields — needed by prompt builders and persona soft-match
+                "场景主题":        f.get_option(scene, "场景主题"),
                 "道具建议":        f.get_text(scene, "道具建议"),
                 "适合人设标签":    f.get_options(scene, "适合人设标签") or [],
             }
@@ -711,7 +712,24 @@ class ContentGenerationHandler:
         assignments: dict = {}
 
         if persona_pool:
-            # Soft-match scoring: content-type fit + scene↔persona tag overlap + priority tiebreaker
+            # Build strategy-tags cache (content_type → set[人设适配标签]) for soft-match scoring.
+            # Strategy lookup is cached so each unique content_type hits the API at most once.
+            _strategy_tag_cache: dict = {}
+            _platform = (cfg.get("platforms") or [""])[0]
+            _category = cfg.get("_category", "")
+
+            def _get_strategy_tags(ct: str) -> set:
+                if ct not in _strategy_tag_cache:
+                    try:
+                        strat = self._lookup_strategy(ct, _platform, _category)
+                        tags = set(f.get_options(strat, "人设适配标签") or []) if strat else set()
+                    except Exception:
+                        tags = set()
+                    _strategy_tag_cache[ct] = tags
+                return _strategy_tag_cache[ct]
+
+            # Soft-match scoring: content-type fit + scene↔persona tag overlap
+            #   + persona scene fit + strategy persona-tag overlap + priority tiebreaker
             def _soft_score(prec: dict, content_type: str, scene_dict: dict) -> float:
                 sc = 0.0
                 # +2 if persona supports the group's content type
@@ -722,6 +740,15 @@ class ContentGenerationHandler:
                 scene_tags = set(scene_dict.get("适合人设标签") or [])
                 qi_zhi     = set(f.get_options(prec, "气质标签") or [])
                 sc += len(scene_tags & qi_zhi)
+                # +1 if persona 适合场景标签 contains the scene's 场景主题
+                scene_theme = scene_dict.get("场景主题", "")
+                if scene_theme:
+                    persona_scene_tags = set(f.get_options(prec, "适合场景标签") or [])
+                    if scene_theme in persona_scene_tags:
+                        sc += 1.0
+                # +1 per strategy 人设适配标签 that overlaps with persona 气质标签
+                strategy_tags = _get_strategy_tags(content_type)
+                sc += len(strategy_tags & qi_zhi)
                 # priority as fractional tiebreaker (max ~200, so /200 keeps it < 1.0)
                 sc += int(f.get_number(prec, "优先级", 0)) / 200.0
                 return sc
@@ -736,16 +763,16 @@ class ContentGenerationHandler:
                     assignments[g["group_id"]] = self._extract_persona_fields(best)
             else:
                 # 自动 / 多人设轮换: best-fit per group, prefer variety (avoid reuse)
-                _used_ids: list = []
+                _used_rec_ids: set = set()
                 for g in groups:
                     gid = g["group_id"]
                     content_type = g.get("content_type", "")
                     scene_dict   = scene_assignments.get(gid, {})
                     # Prefer personas not yet assigned in this batch; fallback to full pool
-                    candidates = [r for r in persona_pool if id(r) not in _used_ids] or persona_pool
+                    candidates = [r for r in persona_pool if r.get("record_id") not in _used_rec_ids] or persona_pool
                     chosen = max(candidates, key=lambda r: _soft_score(r, content_type, scene_dict))
                     assignments[gid] = self._extract_persona_fields(chosen)
-                    _used_ids.append(id(chosen))
+                    _used_rec_ids.add(chosen.get("record_id"))
         else:
             # Fallback: derive pseudo-persona from Scene person fields
             for g in groups:

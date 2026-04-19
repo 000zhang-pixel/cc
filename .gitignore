@@ -1,47 +1,7 @@
-# Python
+tmp/
+logs/
+workspace/
+middleware/.env
+middleware/venv/
 __pycache__/
 *.pyc
-*.pyo
-*.egg-info/
-dist/
-build/
-
-# Virtual environments
-.venv/
-venv/
-env/
-ENV/
-middleware/venv311/
-
-# Environment variables & secrets
-.env
-.env.*.local
-*.pem
-*.key
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# Project specific - data & logs
-content-store/
-logs/
-*.log
-data/*.db
-data/*.db-shm
-data/*.db-wal
-
-# IDE
-.claude/
-.superpowers/
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
-
-# Temp files
-middleware/_launcher.vbs
-middleware/run_middleware.bat
-*.tmp
-*.temp

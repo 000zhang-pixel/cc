@@ -29,7 +29,7 @@ BASE_URL = os.environ.get("NANOBANANA_BASE_URL", "https://runapi.co/v1").rstrip(
 MODEL = os.environ.get("NANOBANANA_MODEL", "gemini-3.1-flash-image-preview")
 URL = f"{BASE_URL}/models/{MODEL}:generateContent"
 CHAT_ID = "oc_2a18512a232920019a216346de01379a"
-TIMEOUT = 20
+TIMEOUT = float(os.environ.get("NANOBANANA_CHECK_TIMEOUT", "60"))
 
 LOG_FILE  = Path(__file__).parent.parent / "logs" / "nanobanana_check.log"
 

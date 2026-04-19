@@ -2125,50 +2125,31 @@ class ContentGenerationHandler:
         self, table_id: str, record_id: str, filename: str, data: bytes,
         field_name: str = "生成图片"
     ) -> str | None:
-        """
-        Upload bytes as a Bitable attachment.
-
-        Flow:
-          1. Upload file via drive.v1 UploadAllMediaRequest
-             (parent_type="bitable_file", parent_node=base_token)
-          2. Get file_token from response
-          3. Append {"file_token": ..., "name": ...} to the target attachment field
-        Returns the file_token on success, None on failure.
-        """
-        import io
+        """Upload bytes as a Bitable attachment and attach them to the record."""
         try:
-            from lark_oapi.api.drive.v1 import (
-                UploadAllMediaRequest,
-                UploadAllMediaRequestBody,
-            )
-
-            body = (
-                UploadAllMediaRequestBody.builder()
-                .parent_type("bitable_file")
-                .parent_node(self._feishu.base_token)
-                .file_name(filename)
-                .size(len(data))
-                .file(io.BytesIO(data))
-                .build()
-            )
-            resp = self._feishu._client.drive.v1.media.upload_all(
-                UploadAllMediaRequest.builder().request_body(body).build()
-            )
-            if not resp.success():
-                logger.warning(
-                    "drive upload failed [%s]: %s (file=%s)", resp.code, resp.msg, filename
-                )
+            if not self._storage:
+                logger.warning("Attachment upload skipped for %s: LocalStorage unavailable", filename)
                 return None
 
-            file_token = resp.data.file_token
-            logger.debug("Uploaded %s → file_token=%s", filename, file_token)
-
-            # Append token to record's attachment field
-            rec = self._feishu.get_record(table_id, record_id)
-            existing = rec["fields"].get(field_name) or []
-            existing.append({"file_token": file_token, "name": filename})
-            self._feishu.update_record(table_id, record_id, {field_name: existing})
-            return file_token
+            tmp_dir = self._storage.get_content_path("_tmp_uploads", record_id)
+            tmp_dir.mkdir(parents=True, exist_ok=True)
+            tmp_path = tmp_dir / filename
+            tmp_path.write_bytes(data)
+            try:
+                file_token = self._feishu.upload_attachment(
+                    table_id,
+                    record_id,
+                    field_name,
+                    str(tmp_path),
+                    file_name=filename,
+                )
+                logger.debug("Uploaded %s → file_token=%s", filename, file_token)
+                return file_token
+            finally:
+                try:
+                    tmp_path.unlink(missing_ok=True)
+                except Exception:
+                    logger.debug("Failed to clean up temp upload file %s", tmp_path, exc_info=True)
 
         except Exception as exc:
             logger.warning("Attachment upload exception for %s: %s", filename, exc)

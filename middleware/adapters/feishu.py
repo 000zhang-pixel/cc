@@ -9,6 +9,7 @@ import logging
 import os
 import shutil
 import subprocess
+from pathlib import Path
 from typing import Any
 
 import lark_oapi as lark
@@ -22,6 +23,7 @@ from lark_oapi.api.bitable.v1 import (
     UpdateAppTableRecordRequest,
     CreateAppTableRecordRequest,
     DeleteAppTableRecordRequest,
+    ListAppTableFieldRequest,
     AppTableRecord,
 )
 from lark_oapi.api.drive.v1 import DownloadMediaRequest
@@ -43,6 +45,7 @@ class FeishuClient:
         self._cli_profile = (os.environ.get("LARK_CLI_PROFILE", "ai-content-hub") or "ai-content-hub").strip()
         self._cli_identity = (os.environ.get("LARK_CLI_IDENTITY", "user") or "user").strip()
         self._cli_command = self._resolve_cli_command(os.environ.get("LARK_CLI_COMMAND"))
+        self._field_id_cache: dict[tuple[str, str], str] = {}
 
         if self._write_backend not in {"sdk", "cli"}:
             raise RuntimeError(
@@ -154,6 +157,99 @@ class FeishuClient:
                 f"table={table_id}, record={record_id}, response={json.dumps(payload, ensure_ascii=False)[:500]}"
             )
         return payload
+
+    def get_field_id(self, table_id: str, field_name: str) -> str:
+        cache_key = (table_id, field_name)
+        cached = self._field_id_cache.get(cache_key)
+        if cached:
+            return cached
+
+        resp = self._client.bitable.v1.app_table_field.list(
+            ListAppTableFieldRequest.builder()
+            .app_token(self.base_token)
+            .table_id(table_id)
+            .page_size(500)
+            .build()
+        )
+        if not resp.success():
+            raise RuntimeError(
+                f"list_fields failed [{resp.code}]: {resp.msg} (table={table_id})"
+            )
+
+        items = resp.data.items or []
+        for item in items:
+            if item.field_name == field_name:
+                self._field_id_cache[cache_key] = item.field_id
+                return item.field_id
+        raise RuntimeError(f"field not found: table={table_id}, field={field_name}")
+
+    def upload_attachment(self, table_id: str, record_id: str, field_name: str, file_path: str, *, file_name: str | None = None) -> str:
+        if self._write_backend != "cli":
+            raise RuntimeError("upload_attachment currently requires FEISHU_WRITE_BACKEND=cli")
+        if not self._cli_command:
+            raise RuntimeError("lark-cli command is unavailable")
+
+        field_id = self.get_field_id(table_id, field_name)
+        path_obj = Path(file_path)
+        cmd = [
+            self._cli_command,
+            "base",
+            "+record-upload-attachment",
+            "--profile",
+            self._cli_profile,
+            "--as",
+            self._cli_identity,
+            "--base-token",
+            self.base_token,
+            "--table-id",
+            table_id,
+            "--record-id",
+            record_id,
+            "--field-id",
+            field_id,
+            "--file",
+            f"./{path_obj.name}",
+        ]
+        if file_name:
+            cmd.extend(["--name", file_name])
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=False,
+            cwd=str(path_obj.parent),
+        )
+        logger.info(
+            "Feishu CLI attachment upload: table=%s record=%s field=%s field_id=%s file=%s identity=%s profile=%s exit_code=%s",
+            table_id,
+            record_id,
+            field_name,
+            field_id,
+            path_obj.name,
+            self._cli_identity,
+            self._cli_profile,
+            proc.returncode,
+        )
+        if proc.returncode != 0:
+            raise RuntimeError(
+                "lark-cli attachment upload failed: "
+                f"table={table_id}, record={record_id}, field={field_name}, exit_code={proc.returncode}, "
+                f"stderr={proc.stderr.strip() or proc.stdout.strip()}"
+            )
+        payload = self._parse_cli_json(proc.stdout, action="base +record-upload-attachment")
+        if payload.get("ok") is False:
+            raise RuntimeError(
+                "lark-cli attachment upload returned ok=false: "
+                f"table={table_id}, record={record_id}, field={field_name}, response={json.dumps(payload, ensure_ascii=False)[:500]}"
+            )
+        attachment = (payload.get("data") or {}).get("attachment") or {}
+        file_token = attachment.get("file_token")
+        if not file_token:
+            raise RuntimeError(
+                "lark-cli attachment upload succeeded but returned no file_token: "
+                f"table={table_id}, record={record_id}, field={field_name}"
+            )
+        return file_token
 
     def list_records(
         self,

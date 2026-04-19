@@ -1,0 +1,19 @@
+phase,table,scope,record_ids_or_range,current_count,issue,required_action,suggested_add_count,priority,notes
+1,Strategy,全表,ST001-ST030,30,高级增强字段为空,批量补齐 标题句式池/叙事角度标签/结构模式/差异化提示模板/人设适配标签/正文禁忌,0,P1,先不删记录
+1,Strategy,结构化修正,ST001-ST020,20,文案叙事节点为纯文本 fallback,改为 JSON 数组,0,P1,优先头部高频策略
+1,Strategy,新增策略,NEW-ST-01~04,0,主营类目覆盖不足,新增 手机链穿搭点睛/手机壳细节质感/组合搭配/礼物送女生,4,P2,新增后再补高级字段
+1,ShotPlan,全表,SP001-SP039,39,适用内容形态与运行时不匹配,统一枚举并兼容 图片/图片生成/组图,0,P0,真实运行时失配
+1,ShotPlan,全表,SP001-SP039,39,缺少镜头约束字段,补齐 禁止重复镜头/动作变化要求,0,P1,建议作为必填
+1,ShotPlan,异常内容类型,SP009;SP020-SP039,21,存在旧内容类型 产品展示/种草图文,映射到当前内容类型或二次审批后归档,0,P0,需要明确映射规则
+1,ShotPlan,新增方案,NEW-SP-01~04,0,主营类目专项方案不足,新增 手机壳装机效果/壳链组合搭配/手机链质感测评/礼物开箱展示,4,P2,新增方案必须带镜头约束
+1,Scene,全表,SC001-SC091,91,缺少主题化联动字段,补齐 场景主题/道具建议/适合人设标签,0,P1,全部记录缺失
+1,Scene,枚举统一,SC018;SC029-SC091,64,人物类型枚举不统一,统一到 有人物·主体/有人物·局部/无人物·纯产品/可有人物,0,P0,避免运行时语义漂移
+1,Scene,技术参数补全,SC029-SC041,13,缺少姿态或光线/色温/景深/镜头参数,按场景补齐技术参数,0,P1,这批手机链场景最急
+1,Scene,异常品类,SC011;SC014;SC019;SC025;SC027;SC028,6,含异常品类 充电器,改为 充电宝 或审批归档,0,P0,需业务确认
+1,Scene,新增场景,NEW-SC-01~06,0,主营高价值场景覆盖仍不足,新增 组合桌面/送礼礼盒/职场通勤/书店咖啡馆/极简冷调棚拍/无人物高质感桌面,6,P2,新增时同步补主题和标签
+1,Persona,全表校验,PS001-PS012,12,结构稳定但需标签对齐,检查并必要时微调 气质标签/适合场景标签,0,P2,当前无硬伤
+1,Persona,新增人设,NEW-PS-01~04,0,手机链主营风格可进一步增强,新增 潮流街头/送礼精致/极简白领/中性简洁,4,P3,可后置
+2,Codebase,definitions.py,scripts/tables/definitions.py,1,表定义仍含旧枚举 手机挂架 等,修正枚举与飞书线上一致,0,P0,需与飞书表同步
+2,Codebase,content_generation.py,middleware/handlers/content_generation.py,1,shotplan 形态匹配过窄,兼容 图片/图片生成/组图,0,P0,代码与表同时修
+2,Codebase,seed_shotplans.py,scripts/seed_shotplans.py,1,种子脚本含旧品类 手机挂架,改为 手机链 并补镜头约束字段,0,P1,避免继续污染数据
+2,Codebase,remediation script,scripts/remediate_tables.py,0,缺少批量修复脚本,新增拉取-更新-新增-记录日志脚本,0,P0,作为最终飞书落地入口

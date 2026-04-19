@@ -20,6 +20,18 @@ from openai import OpenAI
 logger = logging.getLogger(__name__)
 
 
+def _looks_unconfigured_secret(value: str | None) -> bool:
+    if value is None:
+        return True
+    s = str(value).strip()
+    if not s or "${" in s:
+        return True
+    placeholders = {
+        "xxx", "***", "YOUR_API_KEY", "your_api_key", "sk-xxx", "test", "TBD",
+    }
+    return s in placeholders or len(s) <= 5
+
+
 # ---------------------------------------------------------------------------
 # Retry helper
 # ---------------------------------------------------------------------------
@@ -74,6 +86,8 @@ class TextModelAdapter:
         shared_cfg: top-level text_model dict (max_concurrency, retry_*)
         """
         self._provider = cfg.get("model", provider)  # yaml model字段优先，否则用provider名
+        self._api_mode = cfg.get("api", "chat-completions")
+        self._reasoning = cfg.get("reasoning")
         self._client = OpenAI(
             api_key=cfg["api_key"],
             base_url=cfg.get("base_url", "https://api.openai.com/v1"),
@@ -83,19 +97,91 @@ class TextModelAdapter:
         self._retry_max = shared_cfg["retry_max"]
         self._retry_base = shared_cfg["retry_base_seconds"]
 
+    @staticmethod
+    def _extract_response_text(resp) -> str:
+        text = getattr(resp, "output_text", None)
+        if text:
+            return text
+        output = getattr(resp, "output", None) or []
+        fragments = []
+        for item in output:
+            for part in getattr(item, "content", None) or []:
+                part_text = getattr(part, "text", None)
+                if part_text:
+                    fragments.append(part_text)
+        return "\n".join(fragments).strip()
+
+    @staticmethod
+    def _extract_chat_text(resp) -> str:
+        choice = resp.choices[0]
+        msg = choice.message
+        content = msg.content or ""
+        if content:
+            return content
+        if getattr(msg, "reasoning_content", None) and choice.finish_reason == "length":
+            return ""
+        return content
+
     def complete(self, system_prompt: str, user_prompt: str) -> str:
         """Return the assistant message text."""
         def _call():
             with self._semaphore:
+                if self._api_mode in {"openai-responses", "codex-responses"}:
+                    kwargs = {
+                        "model": self._provider,
+                        "instructions": system_prompt,
+                        "input": user_prompt,
+                        "max_output_tokens": self._max_tokens,
+                    }
+                    if self._reasoning is not None:
+                        kwargs["reasoning"] = {"effort": "minimal" if self._reasoning else "none"}
+                    if self._api_mode == "codex-responses":
+                        fragments = []
+                        with self._client.responses.stream(**kwargs) as stream:
+                            for event in stream:
+                                event_type = getattr(event, "type", None)
+                                if event_type in {"response.output_text.delta", "response.refusal.delta"}:
+                                    delta = getattr(event, "delta", None)
+                                    if delta:
+                                        fragments.append(delta)
+                            resp = stream.get_final_response()
+                        text = "".join(fragments).strip()
+                        return text or self._extract_response_text(resp)
+                    resp = self._client.responses.create(**kwargs)
+                    return self._extract_response_text(resp)
+
+                messages = [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ]
                 resp = self._client.chat.completions.create(
                     model=self._provider,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
+                    messages=messages,
                     max_tokens=self._max_tokens,
                 )
-                return resp.choices[0].message.content or ""
+                text = self._extract_chat_text(resp)
+                if text:
+                    return text
+
+                choice = resp.choices[0]
+                msg = choice.message
+                if getattr(msg, "reasoning_content", None) and choice.finish_reason == "length":
+                    retry_max_tokens = min(max(self._max_tokens * 4, 256), 8192)
+                    if retry_max_tokens > self._max_tokens:
+                        logger.warning(
+                            "Text provider %s exhausted max_tokens before producing final content; retrying once with max_tokens=%d",
+                            self._provider,
+                            retry_max_tokens,
+                        )
+                        retry_resp = self._client.chat.completions.create(
+                            model=self._provider,
+                            messages=messages,
+                            max_tokens=retry_max_tokens,
+                        )
+                        retry_text = self._extract_chat_text(retry_resp)
+                        if retry_text:
+                            return retry_text
+                return text
 
         return _with_retry(_call, self._retry_max, self._retry_base)
 
@@ -136,6 +222,15 @@ class ImageModelAdapter:
         self._retry_max = shared_cfg["retry_max"]
         self._retry_base = shared_cfg["retry_base_seconds"]
 
+    def _generate_url(self) -> str:
+        """Build a Gemini-style generateContent URL from either host-only or /v1 base URLs."""
+        base = self._base_url.rstrip("/")
+        if base.endswith("/v1"):
+            api_root = base
+        else:
+            api_root = f"{base}/v1"
+        return f"{api_root}/models/{self._model}:generateContent"
+
     @staticmethod
     def _detect_mime(data: bytes) -> str:
         """Detect image MIME type from magic bytes."""
@@ -153,7 +248,7 @@ class ImageModelAdapter:
         ref_images: optional list of reference images (e.g. 白底图) passed as inlineData
                     before the text prompt. Each is a raw bytes object.
         """
-        url = f"{self._base_url}/v1/models/{self._model}:generateContent"
+        url = self._generate_url()
         parts = []
         for img_bytes in (ref_images or []):
             mime = self._detect_mime(img_bytes)
@@ -463,6 +558,10 @@ def build_text_adapter(provider_name: str, model_params: dict) -> TextModelAdapt
     provider_cfg = cfg_root["providers"].get(provider_name)
     if provider_cfg is None:
         raise ValueError(f"Unknown text model provider: {provider_name!r}")
+    if _looks_unconfigured_secret(provider_cfg.get("api_key")):
+        raise ValueError(
+            f"Text model provider {provider_name!r} is not configured with a valid api_key"
+        )
     return TextModelAdapter(provider_name, provider_cfg, cfg_root)
 
 
@@ -474,6 +573,10 @@ def build_image_adapter(model_params: dict, provider_name: str = None):
     provider_cfg = providers.get(provider_name)
     if provider_cfg is None:
         raise ValueError(f"Unknown image model provider: {provider_name!r}")
+    if _looks_unconfigured_secret(provider_cfg.get("api_key")):
+        raise ValueError(
+            f"Image model provider {provider_name!r} is not configured with a valid api_key"
+        )
     if "volcengine" in provider_name:
         return VolcEngineImageAdapter(provider_cfg, cfg_root)
     return ImageModelAdapter(provider_cfg, cfg_root)
@@ -487,6 +590,10 @@ def build_video_adapter(model_params: dict, provider_name: str = None):
     provider_cfg = providers.get(provider_name)
     if provider_cfg is None:
         raise ValueError(f"Unknown video model provider: {provider_name!r}")
+    if _looks_unconfigured_secret(provider_cfg.get("api_key")):
+        raise ValueError(
+            f"Video model provider {provider_name!r} is not configured with a valid api_key"
+        )
     if "model" in provider_cfg:
         return VolcEngineVideoAdapter(provider_cfg, cfg_root)
     return VideoModelAdapter(provider_cfg, cfg_root)
@@ -501,7 +608,7 @@ def build_vision_adapter(model_params: dict) -> "VisionModelAdapter | None":
     if not providers:
         return None
     provider_cfg = next(iter(providers.values()))
-    # Skip if api_key is still an unexpanded placeholder
-    if not provider_cfg.get("api_key") or "${" in str(provider_cfg.get("api_key", "")):
+    # Skip if api_key is missing or still a placeholder
+    if _looks_unconfigured_secret(provider_cfg.get("api_key")):
         return None
     return VisionModelAdapter(provider_cfg, cfg_root)

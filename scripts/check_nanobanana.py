@@ -24,10 +24,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "middleware"))
 import httpx
 from adapters.feishu import FeishuClient
 
-API_KEY   = os.environ["NANOBANANA_API_KEY"]
-URL       = "https://runapi.co/v1/models/gemini-3.1-flash-image-preview:generateContent"
-CHAT_ID   = "oc_2a18512a232920019a216346de01379a"
-TIMEOUT   = 20
+API_KEY = os.environ.get("NANOBANANA_API_KEY", "")
+BASE_URL = os.environ.get("NANOBANANA_BASE_URL", "https://runapi.co/v1").rstrip("/")
+MODEL = os.environ.get("NANOBANANA_MODEL", "gemini-3.1-flash-image-preview")
+URL = f"{BASE_URL}/models/{MODEL}:generateContent"
+CHAT_ID = "oc_2a18512a232920019a216346de01379a"
+TIMEOUT = 20
 
 LOG_FILE  = Path(__file__).parent.parent / "logs" / "nanobanana_check.log"
 
@@ -40,6 +42,9 @@ def log(msg: str):
 
 def check() -> bool:
     """Returns True if API is back to normal."""
+    if not API_KEY:
+        log("NANOBANANA_API_KEY 未配置")
+        return False
     try:
         payload = {
             "contents": [{"role": "user", "parts": [{"text": "a red apple"}]}],

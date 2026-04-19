@@ -7,13 +7,14 @@ text_model:
       api_key: ${GPT54_API_KEY}
       base_url: https://api.yaps.cn/v1
       model: gpt-5.4
-      api: openai-responses
+      api: codex-responses
+      reasoning: false
       context_window: 272000
       max_tokens: 8192
     kimi-k2.5:
       api_key: ${KIMI_API_KEY}
       base_url: https://api.moonshot.cn/v1
-      model: kimi-k2-5
+      model: kimi-k2.5
       max_tokens: 4096
     deepseek:
       api_key: ${DEEPSEEK_API_KEY}
@@ -28,7 +29,7 @@ image_model:
   providers:
     nanobanana-2:
       api_key: ${NANOBANANA_API_KEY}
-      base_url: https://runapi.co
+      base_url: ${NANOBANANA_BASE_URL}
       model: gemini-3.1-flash-image-preview
       aspect_ratio: "9:16"
       image_size: "1K"

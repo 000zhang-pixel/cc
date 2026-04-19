@@ -53,6 +53,22 @@ def _normalize_model(name: str) -> str:
     return _MODEL_NAME_MAP.get(name, name)
 
 
+def _shotplan_form_aliases(content_form: str) -> list[str]:
+    """Return compatible ShotPlan form aliases during enum migration.
+
+    Runtime now prefers `图片`, but online Feishu data still contains legacy values
+    like `图片生成` and `组图`. We accept both directions during transition.
+    """
+    aliases = {
+        "图片": ["图片", "图片生成", "组图"],
+        "图片生成": ["图片生成", "图片", "组图"],
+        "组图": ["组图", "图片", "图片生成"],
+        "视频": ["视频", "视频画面"],
+        "视频画面": ["视频画面", "视频"],
+    }
+    return aliases.get(content_form, [content_form])
+
+
 # Content types pool (12 types)
 CONTENT_TYPES = [
     "种草推荐", "好物分享", "深度测评", "对比测评",
@@ -159,11 +175,19 @@ class ContentGenerationHandler:
             except Exception:
                 logger.warning("Failed to write briefs to plan.json", exc_info=True)
 
-        # --- 6. Create Prompt records in 表3 ---
+        # --- 6. Validate providers before creating downstream records ---
+        text_adapter = build_text_adapter(cfg["text_model_name"], self._model_params)
+        has_img_group = any(group["type"] == "img" for group in groups)
+        has_vid_group = any(group["type"] == "vid" for group in groups)
+        if cfg["task_type"] == "AI全创作" and has_img_group:
+            build_image_adapter(self._model_params, cfg["image_model_name"])
+        if has_vid_group:
+            build_video_adapter(self._model_params, cfg["video_model_name"])
+
+        # --- 7. Create Prompt records in 表3 ---
         prompt_records = self._create_prompt_records(record_id, groups, plan_fields, sku_fields, cfg)
 
-        # --- 7. Generate Prompts via Prompt engine ---
-        text_adapter = build_text_adapter(cfg["text_model_name"], self._model_params)
+        # --- 8. Generate Prompts via Prompt engine ---
         self._fill_prompts(prompt_records, sku_fields, cfg, tags, text_adapter, scene_assignments, briefs, persona_assignments)
 
         # P0-2: Re-persist briefs now that _fill_prompts has resolved strategy_id + shotplan_id
@@ -552,11 +576,16 @@ class ContentGenerationHandler:
         except Exception:
             logger.warning("_lookup_shotplan: failed to list records", exc_info=True)
             return None
+        form_aliases = set(_shotplan_form_aliases(content_form))
         form_matched = [
             r for r in records
-            if content_form in (self._feishu.get_options(r, "适用内容形态") or [])
+            if form_aliases.intersection(self._feishu.get_options(r, "适用内容形态") or [])
         ]
         candidates = form_matched if form_matched else records
+        logger.info(
+            "_lookup_shotplan: content_form=%r aliases=%s matched=%d enabled=%d",
+            content_form, sorted(form_aliases), len(form_matched), len(records),
+        )
         return self._select_best(
             candidates, content_type, platform=None, category=category,
             ct_field="适用内容类型", pt_field=None, cat_field="适用品类",
@@ -1015,14 +1044,24 @@ class ContentGenerationHandler:
         except json.JSONDecodeError:
             nodes = []
 
-        if nodes and isinstance(nodes[0], dict):
+        if nodes:
+            normalized_nodes: list[tuple[int, str, str]] = []
+            for idx, n in enumerate(nodes, start=1):
+                if isinstance(n, dict):
+                    label = str(n.get("zh") or n.get("node") or "").strip()
+                    guidance = str(n.get("guidance") or "").strip()
+                    node_index = n.get("index")
+                    try:
+                        node_index = int(node_index)
+                    except Exception:
+                        node_index = idx
+                    normalized_nodes.append((node_index, label, guidance))
+                else:
+                    normalized_nodes.append((idx, str(n).strip(), ""))
             node_lines = "\n".join(
-                f"{n['index']}. 【{n.get('zh', n.get('node', ''))}】{n.get('guidance', '')}"
-                for n in nodes
-            )
-        elif nodes:
-            # nodes is a list of strings (plain array from Feishu field)
-            node_lines = "\n".join(f"{i + 1}. 【{n}】" for i, n in enumerate(nodes))
+                f"{node_index}. 【{label}】{guidance}".rstrip()
+                for node_index, label, guidance in normalized_nodes if label
+            ) or "（按内容类型的常规结构展开）"
         elif nodes_raw:
             import re as _re
             raw_parts = _re.split(r"→|->|\n", nodes_raw)

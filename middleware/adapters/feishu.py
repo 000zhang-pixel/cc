@@ -1,10 +1,14 @@
 """
 Feishu Bitable read/write client for the middleware.
-Wraps lark-oapi SDK for record CRUD operations.
+Reads stay on lark-oapi SDK. Writes can optionally route through lark-cli user auth.
 """
 from __future__ import annotations
-import os
+
+import json
 import logging
+import os
+import shutil
+import subprocess
 from typing import Any
 
 import lark_oapi as lark
@@ -34,6 +38,122 @@ class FeishuClient:
             .log_level(lark.LogLevel.WARNING) \
             .timeout(30) \
             .build()
+
+        self._write_backend = (os.environ.get("FEISHU_WRITE_BACKEND", "sdk") or "sdk").strip().lower()
+        self._cli_profile = (os.environ.get("LARK_CLI_PROFILE", "ai-content-hub") or "ai-content-hub").strip()
+        self._cli_identity = (os.environ.get("LARK_CLI_IDENTITY", "user") or "user").strip()
+        self._cli_command = self._resolve_cli_command(os.environ.get("LARK_CLI_COMMAND"))
+
+        if self._write_backend not in {"sdk", "cli"}:
+            raise RuntimeError(
+                f"Unsupported FEISHU_WRITE_BACKEND={self._write_backend!r}; expected 'sdk' or 'cli'"
+            )
+
+        if self._write_backend == "cli":
+            self._verify_cli_auth()
+
+        logger.info(
+            "Feishu client initialized (read_backend=sdk, write_backend=%s%s)",
+            self._write_backend,
+            f", cli_profile={self._cli_profile}, cli_identity={self._cli_identity}" if self._write_backend == "cli" else "",
+        )
+
+    @staticmethod
+    def _resolve_cli_command(configured: str | None) -> str | None:
+        candidate = (configured or "").strip()
+        if candidate:
+            return candidate
+        for name in ("lark-cli", "lark-cli.cmd"):
+            resolved = shutil.which(name)
+            if resolved:
+                return resolved
+        return None
+
+    def _verify_cli_auth(self) -> None:
+        if not self._cli_command:
+            raise RuntimeError(
+                "FEISHU_WRITE_BACKEND=cli but lark-cli was not found in PATH. "
+                "Set LARK_CLI_COMMAND explicitly or install lark-cli."
+            )
+        proc = subprocess.run(
+            [self._cli_command, "auth", "status", "--profile", self._cli_profile, "--verify"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if proc.returncode != 0:
+            raise RuntimeError(
+                "lark-cli auth verification failed: "
+                f"exit_code={proc.returncode}, stderr={proc.stderr.strip() or proc.stdout.strip()}"
+            )
+        payload = self._parse_cli_json(proc.stdout, action="auth-status")
+        token_status = payload.get("tokenStatus")
+        verified = payload.get("verified")
+        if token_status != "valid" or verified is not True:
+            raise RuntimeError(
+                "lark-cli auth is not valid/verified: "
+                f"tokenStatus={token_status!r}, verified={verified!r}, profile={self._cli_profile}"
+            )
+
+    @staticmethod
+    def _parse_cli_json(stdout: str, action: str) -> dict:
+        text = (stdout or "").strip()
+        if not text:
+            raise RuntimeError(f"lark-cli {action} returned empty stdout")
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"lark-cli {action} returned non-JSON output: {text[:500]}") from exc
+
+    def _run_cli_bitable_write(self, *, table_id: str, record_id: str | None, fields: dict) -> dict:
+        if not self._cli_command:
+            raise RuntimeError("lark-cli command is unavailable")
+        cmd = [
+            self._cli_command,
+            "base",
+            "+record-upsert",
+            "--profile",
+            self._cli_profile,
+            "--as",
+            self._cli_identity,
+            "--base-token",
+            self.base_token,
+            "--table-id",
+            table_id,
+            "--json",
+            json.dumps(fields, ensure_ascii=False),
+        ]
+        if record_id:
+            cmd.extend(["--record-id", record_id])
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        logger.info(
+            "Feishu CLI write: table=%s record=%s fields=%s identity=%s profile=%s exit_code=%s",
+            table_id,
+            record_id,
+            sorted(fields.keys()),
+            self._cli_identity,
+            self._cli_profile,
+            proc.returncode,
+        )
+        if proc.returncode != 0:
+            raise RuntimeError(
+                "lark-cli write failed: "
+                f"table={table_id}, record={record_id}, exit_code={proc.returncode}, "
+                f"stderr={proc.stderr.strip() or proc.stdout.strip()}"
+            )
+
+        payload = self._parse_cli_json(proc.stdout, action="base +record-upsert")
+        if payload.get("code") not in (None, 0):
+            raise RuntimeError(
+                "Feishu OpenAPI write failed: "
+                f"code={payload.get('code')}, msg={payload.get('msg')}, table={table_id}, record={record_id}"
+            )
+        if payload.get("ok") is False:
+            raise RuntimeError(
+                "lark-cli write returned ok=false: "
+                f"table={table_id}, record={record_id}, response={json.dumps(payload, ensure_ascii=False)[:500]}"
+            )
+        return payload
 
     def list_records(
         self,
@@ -92,6 +212,14 @@ class FeishuClient:
 
     def update_record(self, table_id: str, record_id: str, fields: dict) -> None:
         """Update specific fields on an existing record."""
+        if self._write_backend == "cli":
+            self._run_cli_bitable_write(
+                table_id=table_id,
+                record_id=record_id,
+                fields=fields,
+            )
+            return
+
         record = AppTableRecord.builder().fields(fields).build()
         resp = self._client.bitable.v1.app_table_record.update(
             UpdateAppTableRecordRequest.builder()
@@ -107,8 +235,70 @@ class FeishuClient:
                 f"(table={table_id}, record={record_id}, fields={list(fields.keys())})"
             )
 
+    def _infer_created_record_id(self, table_id: str, fields: dict, payload: dict) -> str | None:
+        data = payload.get("data") or {}
+        record = data.get("record") or {}
+        for candidate in (
+            record.get("record_id"),
+            record.get("id"),
+            data.get("record_id"),
+            data.get("id"),
+        ):
+            if isinstance(candidate, str) and candidate.strip():
+                return candidate.strip()
+
+        unique_lookup_fields = [
+            "内容编号",
+            "提示词编号",
+            "发布编号",
+            "规划编号",
+            "素材编号",
+            "SKU编号",
+        ]
+        for field_name in unique_lookup_fields:
+            value = fields.get(field_name)
+            if not isinstance(value, str) or not value.strip():
+                continue
+            escaped = value.replace('\\', '\\\\').replace('"', '\\"')
+            try:
+                matches = self.list_records(
+                    table_id,
+                    filter_str=f'CurrentValue.[{field_name}] = "{escaped}"',
+                )
+            except Exception:
+                logger.warning(
+                    "Feishu create_record fallback lookup failed: table=%s field=%s value=%r",
+                    table_id,
+                    field_name,
+                    value,
+                    exc_info=True,
+                )
+                continue
+            if len(matches) == 1:
+                return matches[0]["record_id"]
+            if len(matches) > 1:
+                raise RuntimeError(
+                    "Feishu create_record fallback lookup was ambiguous: "
+                    f"table={table_id}, field={field_name}, value={value!r}, matches={len(matches)}"
+                )
+        return None
+
     def create_record(self, table_id: str, fields: dict) -> str:
         """Create a new record and return its record_id."""
+        if self._write_backend == "cli":
+            payload = self._run_cli_bitable_write(
+                table_id=table_id,
+                record_id=None,
+                fields=fields,
+            )
+            record_id = self._infer_created_record_id(table_id, fields, payload)
+            if not record_id:
+                raise RuntimeError(
+                    "Feishu create_record via CLI succeeded but response had no record_id and fallback lookup failed: "
+                    f"table={table_id}, response={json.dumps(payload, ensure_ascii=False)[:500]}"
+                )
+            return record_id
+
         record = AppTableRecord.builder().fields(fields).build()
         resp = self._client.bitable.v1.app_table_record.create(
             CreateAppTableRecordRequest.builder()
@@ -225,7 +415,6 @@ class FeishuClient:
 
         Fails silently (logs warning) so notification errors never block the main flow.
         """
-        import json
         try:
             body = CreateMessageRequestBody.builder() \
                 .receive_id(chat_id) \
@@ -255,7 +444,6 @@ class FeishuClient:
 
         Fails silently (logs warning) so notification errors never block the main flow.
         """
-        import json
         try:
             body = CreateMessageRequestBody.builder() \
                 .receive_id(chat_id) \

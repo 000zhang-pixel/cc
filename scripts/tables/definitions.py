@@ -56,7 +56,7 @@ TABLES: list[dict] = [
             {"field_name": "SPU编号",   "type": TEXT},
             {"field_name": "产品简称",  "type": TEXT},
             {"field_name": "商品名称",  "type": TEXT},
-            {"field_name": "品类",      "type": SINGLE, "property": _opt(["手机壳", "手机挂架", "其他"])},
+            {"field_name": "品类",      "type": SINGLE, "property": _opt(["手机壳", "手机链", "充电宝", "其他"])},
             {"field_name": "适配机型",  "type": TEXT},
             {"field_name": "材质",      "type": MULTI,  "property": _opt(["透明", "磨砂", "皮质", "硅胶", "金属"])},
             {"field_name": "颜色",      "type": MULTI,  "property": _opt(["透明", "黑", "白", "渐变", "彩色"])},
@@ -83,7 +83,7 @@ TABLES: list[dict] = [
             {"field_name": "标签名称",     "type": TEXT},
             {"field_name": "平台",         "type": MULTI,  "property": _opt(["得物", "小红书"])},
             {"field_name": "行业",         "type": SINGLE, "property": _opt(["3C数码", "时尚", "生活", "其他"])},
-            {"field_name": "品类",         "type": SINGLE, "property": _opt(["手机壳", "手机挂架", "通用"])},
+            {"field_name": "品类",         "type": SINGLE, "property": _opt(["手机壳", "手机链", "充电宝", "通用"])},
             {"field_name": "话题热度",     "type": NUMBER},
             {"field_name": "权重评分",     "type": NUMBER},
             {"field_name": "使用频次",     "type": NUMBER},
@@ -112,7 +112,7 @@ TABLES: list[dict] = [
             # 中台自动识别
             {"field_name": "来源平台",     "type": SINGLE, "property": _opt(["得物", "小红书", "其他"])},
             {"field_name": "内容形态",     "type": SINGLE, "property": _opt(["单图文", "图文", "视频"])},
-            {"field_name": "品类",         "type": SINGLE, "property": _opt(["手机壳", "手机挂架", "通用"])},
+            {"field_name": "品类",         "type": SINGLE, "property": _opt(["手机壳", "手机链", "充电宝", "通用"])},
             {"field_name": "内容类型",     "type": SINGLE, "property": _opt([
                 "产品展示", "使用场景", "穿搭搭配", "场景展示", "日常vlog",
                 "开箱", "买家秀/晒单", "节日/活动限定", "新品发布", "选购攻略/使用教程",
@@ -156,9 +156,9 @@ TABLES: list[dict] = [
             {"field_name": "视频最短时长(秒)","type": NUMBER},
             {"field_name": "视频最长时长(秒)","type": NUMBER},
             {"field_name": "注入标签数(N)",  "type": NUMBER},
-            {"field_name": "文案模型",       "type": SINGLE, "property": _opt(["GPT-4.1", "Kimi K2.5", "DeepSeek"])},
-            {"field_name": "图片模型",       "type": SINGLE, "property": _opt(["Nanobanana 2"])},
-            {"field_name": "视频模型",       "type": SINGLE, "property": _opt(["Veo 3"])},
+            {"field_name": "文案模型",       "type": SINGLE, "property": _opt(["gpt-5.4", "kimi-k2.5", "deepseek"])},
+            {"field_name": "图片模型",       "type": SINGLE, "property": _opt(["nanobanana-2", "volcengine-seedream"])},
+            {"field_name": "视频模型",       "type": SINGLE, "property": _opt(["veo-3", "volcengine-seedance"])},
             {"field_name": "确认执行",       "type": SINGLE, "property": _opt(["否", "是"])},
             {"field_name": "执行状态",       "type": SINGLE, "property": _opt(["待执行", "执行中", "完成", "失败"])},
             {"field_name": "创建时间",       "type": DATE},
@@ -259,9 +259,22 @@ TABLES: list[dict] = [
                 "新品发布", "选购攻略/使用教程",
             ])},
             {"field_name": "适用平台",       "type": MULTI, "property": _opt(["小红书", "得物"])},
-            {"field_name": "适用品类",       "type": MULTI, "property": _opt(["手机壳", "手机挂架", "充电宝"])},
+            {"field_name": "适用品类",       "type": MULTI, "property": _opt(["手机壳", "手机链", "充电宝"])},
             {"field_name": "是否启用",       "type": SINGLE, "property": _opt(["启用", "停用"])},
             {"field_name": "优先级",         "type": NUMBER},
+            {"field_name": "标题写作指南",   "type": TEXT},
+            {"field_name": "标题句式池",     "type": TEXT},
+            {"field_name": "叙事角度标签",   "type": MULTI, "property": _opt([
+                "搭配点睛", "日常实用", "细节质感", "氛围感种草", "礼物推荐",
+            ])},
+            {"field_name": "结构模式",       "type": SINGLE, "property": _opt([
+                "场景切入", "痛点切入", "体验切入", "对比切入", "情绪切入",
+            ])},
+            {"field_name": "正文禁忌",       "type": TEXT},
+            {"field_name": "差异化提示模板", "type": TEXT},
+            {"field_name": "人设适配标签",   "type": MULTI, "property": _opt([
+                "甜酷", "清冷", "青春", "精致", "松弛", "中性简洁",
+            ])},
             {"field_name": "备注",           "type": TEXT},
         ],
         "links": [],
@@ -276,15 +289,21 @@ TABLES: list[dict] = [
         "fields": [
             {"field_name": "方案编号",     "type": TEXT},
             {"field_name": "方案名称",     "type": TEXT},
-            {"field_name": "适用内容形态", "type": MULTI, "property": _opt(["图片生成", "视频画面"])},
+            {"field_name": "适用内容形态", "type": MULTI, "property": _opt(["图片", "图片生成", "组图", "视频画面"])},
             {"field_name": "适用内容类型", "type": MULTI, "property": _opt([
                 "种草推荐", "好物分享", "深度测评", "对比测评", "穿搭搭配",
                 "场景展示", "日常vlog", "开箱", "买家秀/晒单", "节日/活动限定",
                 "新品发布", "选购攻略/使用教程",
             ])},
-            {"field_name": "适用品类",     "type": MULTI, "property": _opt(["手机壳", "手机挂架", "充电宝"])},
+            {"field_name": "适用品类",     "type": MULTI, "property": _opt(["手机壳", "手机链", "充电宝"])},
             {"field_name": "角色序列",     "type": TEXT},   # JSON 数组
             {"field_name": "节点数量",     "type": NUMBER},
+            {"field_name": "构图节奏",     "type": SINGLE, "property": _opt(["稳定", "丰富", "跳跃"])},
+            {"field_name": "人物出镜比例", "type": SINGLE, "property": _opt(["无人物", "少量", "中等", "高"])},
+            {"field_name": "近中远景配比", "type": TEXT},
+            {"field_name": "道具密度",     "type": SINGLE, "property": _opt(["低", "中", "高"])},
+            {"field_name": "动作变化要求", "type": TEXT},
+            {"field_name": "禁止重复镜头", "type": TEXT},
             {"field_name": "是否启用",     "type": SINGLE, "property": _opt(["启用", "停用"])},
             {"field_name": "备注",         "type": TEXT},
         ],
@@ -302,12 +321,12 @@ TABLES: list[dict] = [
             {"field_name": "场景名称",      "type": TEXT},
             {"field_name": "是否启用",      "type": SINGLE, "property": _opt(["启用", "停用"])},
             {"field_name": "权重",          "type": NUMBER},
-            {"field_name": "适用品类",      "type": MULTI, "property": _opt(["手机壳", "手机挂架", "充电宝"])},
+            {"field_name": "适用品类",      "type": MULTI, "property": _opt(["手机壳", "手机链", "充电宝"])},
             {"field_name": "适用平台",      "type": MULTI, "property": _opt(["小红书", "得物"])},
             {"field_name": "使用频次",      "type": NUMBER},
             # 人物模块
             {"field_name": "人物类型",      "type": SINGLE, "property": _opt([
-                "有人物·主体", "有人物·配角", "无人物·纯产品",
+                "有人物·主体", "有人物·局部", "有人物·配角", "无人物·纯产品", "可有人物",
             ])},
             {"field_name": "年龄段",        "type": SINGLE, "property": _opt([
                 "18-22岁学生", "23-28岁职场", "28-35岁轻熟", "不指定",
@@ -326,6 +345,9 @@ TABLES: list[dict] = [
             ])},
             {"field_name": "时段光境",      "type": SINGLE, "property": _opt([
                 "清晨", "午后", "傍晚黄金时段", "夜间", "不限",
+            ])},
+            {"field_name": "场景主题",      "type": SINGLE, "property": _opt([
+                "商场", "通勤", "校园", "居家", "街头", "咖啡馆", "户外", "礼物", "棚拍",
             ])},
             {"field_name": "空间感",        "type": SINGLE, "property": _opt([
                 "紧凑特写", "中景带环境", "宽景带氛围",
@@ -353,6 +375,11 @@ TABLES: list[dict] = [
             {"field_name": "镜头感",        "type": SINGLE, "property": _opt([
                 "85mm人像感", "50mm标准", "35mm广角生活感", "微距特写",
             ])},
+            {"field_name": "氛围等级",      "type": SINGLE, "property": _opt(["低", "中", "高"])},
+            {"field_name": "道具建议",      "type": TEXT},
+            {"field_name": "光线风格标签",  "type": MULTI, "property": _opt(["柔光", "冷白光", "暖调", "背光", "逆光"])},
+            {"field_name": "适合人设标签",  "type": MULTI, "property": _opt(["甜酷", "清冷", "青春", "精致", "松弛", "中性简洁"])},
+            {"field_name": "差异化备注",    "type": TEXT},
             # NANOBANANA Prompt 核心块
             {"field_name": "场景基底_英文", "type": TEXT},
             {"field_name": "风格基调词",    "type": TEXT},
@@ -361,6 +388,37 @@ TABLES: list[dict] = [
             {"field_name": "场景描述_中文", "type": TEXT},
             {"field_name": "参考图",        "type": ATTACHMENT},
             {"field_name": "备注",          "type": TEXT},
+        ],
+        "links": [],
+        "lookups": [],
+    },
+
+    # -----------------------------------------------------------------------
+    # 表12 Persona人设模板表（无依赖）
+    # -----------------------------------------------------------------------
+    {
+        "name": "Persona人设模板表",
+        "fields": [
+            {"field_name": "人设编号",         "type": TEXT},
+            {"field_name": "是否启用",         "type": SINGLE, "property": _opt(["启用", "停用"])},
+            {"field_name": "人设名称",         "type": TEXT},
+            {"field_name": "性别倾向",         "type": SINGLE, "property": _opt(["女", "男", "中性"])},
+            {"field_name": "年龄段",           "type": SINGLE, "property": _opt(["18-22", "22-26", "26-30", "30+"])},
+            {"field_name": "外貌风格",         "type": TEXT},
+            {"field_name": "穿搭风格",         "type": TEXT},
+            {"field_name": "气质标签",         "type": MULTI, "property": _opt(["甜酷", "清冷", "青春", "精致", "松弛", "中性简洁"])},
+            {"field_name": "动作倾向",         "type": TEXT},
+            {"field_name": "适用品类",         "type": MULTI, "property": _opt(["手机链", "手机壳", "充电宝", "通用"])},
+            {"field_name": "适用内容类型",     "type": MULTI, "property": _opt([
+                "种草推荐", "好物分享", "深度测评", "对比测评", "穿搭搭配",
+                "场景展示", "日常vlog", "开箱", "买家秀/晒单", "节日/活动限定",
+                "新品发布", "选购攻略/使用教程",
+            ])},
+            {"field_name": "适合场景标签",     "type": MULTI, "property": _opt(["商场", "通勤", "校园", "居家", "街头", "咖啡馆", "户外", "礼物", "棚拍"])},
+            {"field_name": "Prompt描述模板",   "type": TEXT},
+            {"field_name": "一致性锚点模板",   "type": TEXT},
+            {"field_name": "优先级",           "type": NUMBER},
+            {"field_name": "备注",             "type": TEXT},
         ],
         "links": [],
         "lookups": [],

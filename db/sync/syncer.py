@@ -20,6 +20,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from db.models import (
     Sku, Plan, Content, PublishRecord, Material, Tag,
@@ -182,29 +183,36 @@ class FeishuSyncer:
         with Session(self.engine) as session:
             for raw in records:
                 try:
-                    obj = mapper(raw, session)
-                    if obj is None:
-                        continue
-                    existing = session.execute(
-                        select(model_cls).where(
-                            model_cls.feishu_record_id == raw["record_id"]
-                        )
-                    ).scalar_one_or_none()
+                    with session.begin_nested():
+                        obj = mapper(raw, session)
+                        if obj is None:
+                            continue
+                        existing = session.execute(
+                            select(model_cls).where(
+                                model_cls.feishu_record_id == raw["record_id"]
+                            )
+                        ).scalar_one_or_none()
 
-                    if existing:
-                        # Update non-status fields only
-                        for k, v in vars(obj).items():
-                            if k.startswith("_"):
-                                continue
-                            if k in _STATUS_FIELDS:
-                                continue  # never overwrite local status
-                            setattr(existing, k, v)
-                        existing.synced_at = datetime.utcnow()
-                    else:
-                        obj.synced_at = datetime.utcnow()
-                        session.add(obj)
+                        if existing:
+                            # Update non-status fields only
+                            for k, v in vars(obj).items():
+                                if k.startswith("_"):
+                                    continue
+                                if k in _STATUS_FIELDS:
+                                    continue  # never overwrite local status
+                                setattr(existing, k, v)
+                            existing.synced_at = datetime.utcnow()
+                        else:
+                            obj.synced_at = datetime.utcnow()
+                            session.add(obj)
 
-                    upserted += 1
+                        session.flush()
+                        upserted += 1
+                except IntegrityError as e:
+                    logger.warning(
+                        "[Sync] %s record %s skipped due to integrity conflict: %s",
+                        cursor_key, raw.get("record_id"), e,
+                    )
                 except Exception as e:
                     logger.warning("[Sync] %s record %s mapping error: %s",
                                    cursor_key, raw.get("record_id"), e)
@@ -235,9 +243,12 @@ class FeishuSyncer:
 
     def _map_sku(self, raw: dict, session: Session) -> Sku | None:
         f = raw["fields"]
+        sku_code = (_text(f.get("SKU编号")) or "").strip()
+        if not sku_code:
+            return None
         return Sku(
             feishu_record_id    = raw["record_id"],
-            sku_code            = _text(f.get("SKU编号")) or "",
+            sku_code            = sku_code,
             sku_name            = _text(f.get("SKU名称")) or "",
             spu_code            = _text(f.get("SPU编号")),
             product_alias       = _text(f.get("产品简称")),

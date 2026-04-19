@@ -1015,11 +1015,14 @@ class ContentGenerationHandler:
         except json.JSONDecodeError:
             nodes = []
 
-        if nodes:
+        if nodes and isinstance(nodes[0], dict):
             node_lines = "\n".join(
                 f"{n['index']}. 【{n.get('zh', n.get('node', ''))}】{n.get('guidance', '')}"
                 for n in nodes
             )
+        elif nodes:
+            # nodes is a list of strings (plain array from Feishu field)
+            node_lines = "\n".join(f"{i + 1}. 【{n}】" for i, n in enumerate(nodes))
         elif nodes_raw:
             import re as _re
             raw_parts = _re.split(r"→|->|\n", nodes_raw)

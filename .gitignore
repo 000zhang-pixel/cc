@@ -5,3 +5,7 @@ middleware/.env
 middleware/venv/
 __pycache__/
 *.pyc
+
+# SQLite transient files — WAL/SHM change constantly while middleware runs
+*.db-wal
+*.db-shm

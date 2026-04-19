@@ -1282,7 +1282,12 @@ class ContentGenerationHandler:
         if person_type and person_type not in ("无人物",):
             if _persona_prompt_template:
                 # P1-3: prompt_template is the authoritative full description — use directly
-                person_part = ["", f"【人物】{_persona_prompt_template}"]
+                # Also append style (穿搭风格) and action (动作倾向) if available
+                _style   = (persona or {}).get("style", "").strip()
+                _posture = (persona or {}).get("action", "").strip()
+                _extra_parts = [x for x in [_style, _posture] if x]
+                _extra_str = "，" + "，".join(_extra_parts) if _extra_parts else ""
+                person_part = ["", f"【人物】{_persona_prompt_template}{_extra_str}"]
             else:
                 person_attrs = [x for x in [gender, age_range, appearance, posture] if x]
                 person_line = person_type
@@ -1390,7 +1395,12 @@ class ContentGenerationHandler:
                 posture = scene.get("姿态倾向", "").strip()
 
             if _sub_prompt_template:
-                person_suffix = f"，画面中有{person_type}（{_sub_prompt_template}）"
+                # Also append style (穿搭风格) and action (动作倾向) so AI enforces outfit/pose
+                _style   = (persona or {}).get("style", "").strip()
+                _posture = (persona or {}).get("action", "").strip()
+                _extra_parts = [x for x in [_style, _posture] if x]
+                _extra_str = "，" + "，".join(_extra_parts) if _extra_parts else ""
+                person_suffix = f"，画面中有{person_type}（{_sub_prompt_template}{_extra_str}）"
             else:
                 person_attrs = "、".join(x for x in [gender, age, appear, posture] if x)
                 person_suffix = f"，画面中有{person_type}" + (f"（{person_attrs}）" if person_attrs else "")

@@ -1,0 +1,24 @@
+{
+  "feishu_plan_record_id": "recvg6pOTGhFPn",
+  "sku_code": "SKU_002",
+  "sku_name": "【月光白】亲肤质感-强磁吸",
+  "platforms": [
+    "得物"
+  ],
+  "task_type": "AI全创作",
+  "text_model": "deepseek",
+  "image_model": "nanobanana-2",
+  "video_model": "volcengine-seedance",
+  "created_at": "2026-04-07T19:47:11",
+  "plan_code": "T_260407_038",
+  "scene_assignments": {
+    "img01": {
+      "scene_id": "SC001",
+      "scene_record_id": "recvfNMIQoLFnL",
+      "场景基底_英文": "cozy cafe interior, wooden table with coffee cup, soft warm afternoon sunlight streaming through windows, blurred bokeh background of cafe patrons",
+      "场景描述_中文": "温馨咖啡馆室内，木质桌面配咖啡杯，午后温暖自然光从窗户斜射进来，背景浅景深虚化咖啡馆氛围",
+      "风格基调词": "warm, cozy, lifestyle, aesthetic, professional",
+      "排除描述": "crowded, messy table, harsh lighting, fast food restaurant"
+    }
+  }
+}

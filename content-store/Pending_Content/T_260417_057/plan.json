@@ -1,0 +1,73 @@
+{
+  "feishu_plan_record_id": "recvh2p8MijiOY",
+  "sku_code": "SJL0413001",
+  "sku_name": "彩虹西瓜小马手机链",
+  "platforms": [
+    "得物"
+  ],
+  "task_type": "AI全创作",
+  "text_model": "deepseek",
+  "image_model": "nanobanana-2",
+  "video_model": "volcengine-seedance",
+  "created_at": "2026-04-17T17:14:44",
+  "plan_code": "T_260417_057",
+  "scene_assignments": {
+    "img01": {
+      "scene_id": "SC080",
+      "scene_record_id": "recvggCGNRpISV",
+      "场景基底_英文": "young Asian woman jogging on treadmill, holding phone with chain swaying rhythmically with running motion, gym background blurred, modern multitasking active lifestyle, wearing sports bra with high-waist running tights showing toned midriff, legs and athletic curves in motion, young Asian woman, fashionable sexy, natural curves, natural makeup, 20s",
+      "场景描述_中文": "年轻亚洲女性在跑步机上慢跑，单手持挂链手机，链条随跑步节奏自然晃动，健身房背景虚化，传递边运动边刷手机的现代生活感",
+      "风格基调词": "跑步机动感,现代健身,链条摇曳",
+      "排除描述": "不要跑步姿势变形，不要链条摇曳幅度过大失控，不要健身房背景过于抢眼，不要表情痛苦",
+      "人物类型": "真人出镜",
+      "性别倾向": "女",
+      "年龄段": "18-26岁",
+      "外貌风格": "年轻亚洲女性，时尚性感，身材好曲线自然，精致五官，表情自然真实，轻妆或自然妆，无过度美颜无过度修图",
+      "姿态倾向": "跑步机慢跑动态",
+      "时段光境": "室内恒光",
+      "空间感": "室内公共空间",
+      "光线方向": "侧光",
+      "色温": "中性(4000-5000K)",
+      "景深感": "浅景深·环境虚化",
+      "镜头感": "35mm广角视角"
+    },
+    "img02": {
+      "scene_id": "SC087",
+      "scene_record_id": "recvggCJLGyh6l",
+      "场景基底_英文": "young Asian woman in mini skirt shopping in mall, holding phone with chain, shopping bag in other hand, chain clearly visible, blurred glamorous mall lighting background, stylish shopping girl aesthetic, wearing mini skirt with chic fitted top or blazer showing fashionable leg lines and waist while shopping, young Asian woman, fashionable sexy, natural curves, natural makeup, 20s",
+      "场景描述_中文": "年轻亚洲女性穿迷你裙在商场内购物，手持挂链手机，另一手提购物袋，链条清晰可见，商场背景灯光华丽虚化，传递时髦购物女孩感",
+      "风格基调词": "购物时髦,商场女孩,迷你裙潮流",
+      "排除描述": "不要购物袋遮挡链条，不要商场背景过于嘈杂，不要表情过于严肃，不要服装与场景违和",
+      "人物类型": "真人出镜",
+      "性别倾向": "女",
+      "年龄段": "18-26岁",
+      "外貌风格": "年轻亚洲女性，时尚性感，身材好曲线自然，精致五官，表情自然真实，轻妆或自然妆，无过度美颜无过度修图",
+      "姿态倾向": "行走/购物自然姿态",
+      "时段光境": "室内恒光",
+      "空间感": "室内公共空间",
+      "光线方向": "顶光",
+      "色温": "暖调(2800-3500K)",
+      "景深感": "浅景深·商场虚化",
+      "镜头感": "50mm自然视角"
+    },
+    "img03": {
+      "scene_id": "SC037",
+      "scene_record_id": "recvgcrPqoIVIv",
+      "场景基底_英文": "holiday themed scene (Christmas/Valentine) with phone chain as gift, flowers or candles as props, warm festive mood",
+      "场景描述_中文": "圣诞/情人节/生日等节日氛围布景，手机链作为礼物主角展示，配合彩带、鲜花、蜡烛等节日道具",
+      "风格基调词": "节日氛围,温暖情感,礼物感",
+      "排除描述": "不要道具喧宾夺主，链条必须清晰可见，不要过于拥挤",
+      "人物类型": "可无人物/手部入镜",
+      "性别倾向": "女",
+      "年龄段": "18-28岁",
+      "外貌风格": "年轻亚洲女性，身材比例好，精致五官，自然妆感，无过度美颜",
+      "姿态倾向": "",
+      "时段光境": "",
+      "空间感": "",
+      "光线方向": "",
+      "色温": "",
+      "景深感": "",
+      "镜头感": ""
+    }
+  }
+}

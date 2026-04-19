@@ -1281,13 +1281,15 @@ class ContentGenerationHandler:
         person_part: list[str] = []
         if person_type and person_type not in ("无人物",):
             if _persona_prompt_template:
-                # P1-3: prompt_template is the authoritative full description — use directly
-                # Also append style (穿搭风格) and action (动作倾向) if available
-                _style   = (persona or {}).get("style", "").strip()
+                # action (动作倾向) provides specific pose guidance; style is now embedded in prompt_template
                 _posture = (persona or {}).get("action", "").strip()
-                _extra_parts = [x for x in [_style, _posture] if x]
-                _extra_str = "，" + "，".join(_extra_parts) if _extra_parts else ""
+                _extra_str = "，" + _posture if _posture else ""
                 person_part = ["", f"【人物】{_persona_prompt_template}{_extra_str}"]
+                # Scene 外貌风格 quality standard: inject when it's a rich description (>12 chars)
+                # e.g. "年轻亚洲女性，精致五官，自然妆感，无过度美颜修图" — ensures photo-realism
+                # Short labels like "精致通勤" (4 chars) are skipped
+                if appearance and len(appearance) > 12:
+                    person_part.append(f"人物质感：{appearance}")
             else:
                 person_attrs = [x for x in [gender, age_range, appearance, posture] if x]
                 person_line = person_type
@@ -1395,11 +1397,10 @@ class ContentGenerationHandler:
                 posture = scene.get("姿态倾向", "").strip()
 
             if _sub_prompt_template:
-                # Also append style (穿搭风格) and action (动作倾向) so AI enforces outfit/pose
-                _style   = (persona or {}).get("style", "").strip()
+                # action (动作倾向) provides specific pose guidance; style is now embedded in prompt_template
+                # Quality standard (外貌风格) is already injected in master_prompt — no duplication needed
                 _posture = (persona or {}).get("action", "").strip()
-                _extra_parts = [x for x in [_style, _posture] if x]
-                _extra_str = "，" + "，".join(_extra_parts) if _extra_parts else ""
+                _extra_str = "，" + _posture if _posture else ""
                 person_suffix = f"，画面中有{person_type}（{_sub_prompt_template}{_extra_str}）"
             else:
                 person_attrs = "、".join(x for x in [gender, age, appear, posture] if x)

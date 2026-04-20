@@ -1761,38 +1761,31 @@ class ContentGenerationHandler:
         prior_titles: list[str] = []  # accumulate titles to prevent repetition across groups
         briefs = cfg.get("_briefs", {})
         persona_assignments = cfg.get("_persona_assignments", {})
+        group_runtime: dict[str, dict] = {}
 
+        # Phase A: pre-create / reset all 表4 records first so operators can see the full batch early.
         for g in groups:
             gid = g["group_id"]
             content_code = f"{plan_code}_{gid}"
             is_img = g["type"] == "img"
+            pending_folder_path = None
 
-            # Dedup guard: if content record exists, check whether image generation needs retry
             existing_recs = f.list_records(table_content, filter_str=f'CurrentValue.[内容编号] = "{content_code}"')
             if existing_recs:
                 existing_rec = existing_recs[0]
                 content_record_id = existing_rec["record_id"]
                 existing_gen_status = f.get_option(existing_rec, "生成状态")
-                # If already successfully generated, skip entirely
-                if existing_gen_status == "已生成":
+                skip_generation = existing_gen_status == "已生成"
+                if skip_generation:
                     logger.info("Content record %s already generated, skipping", content_code)
-                    content_record_ids.append(content_record_id)
-                    continue
-                # Otherwise (生成失败 / 生成中 / blank) — retry generation without recreating the record
-                logger.warning(
-                    "Content record %s exists with status=%r — retrying generation",
-                    content_code, existing_gen_status,
-                )
-                content_record_ids.append(content_record_id)
-                # Reset status to 生成中 and clear failure reason
-                f.update_record(table_content, content_record_id, {"生成状态": "生成中", "失败原因": ""})
-                # Fall through to text + image generation below (skip the create block)
+                else:
+                    logger.warning(
+                        "Content record %s exists with status=%r — resetting to 生成中 before retry",
+                        content_code, existing_gen_status,
+                    )
+                    f.update_record(table_content, content_record_id, {"生成状态": "生成中", "失败原因": ""})
                 created_new = False
             else:
-                created_new = True
-
-            if created_new:
-                # Base content record
                 content_fields: dict = {
                     "内容编号": content_code,
                     "关联规划": [plan_record_id],
@@ -1811,9 +1804,9 @@ class ContentGenerationHandler:
                     content_fields["关联SKU"] = sku_ids
 
                 content_record_id = f.create_record(table_content, content_fields)
-                content_record_ids.append(content_record_id)
+                created_new = True
+                skip_generation = False
 
-                # Mirror to local DB
                 db.upsert_content(
                     content_code,
                     feishu_record_id=content_record_id,
@@ -1825,7 +1818,7 @@ class ContentGenerationHandler:
                     gen_status="生成中",
                 )
 
-                # Create skeleton content.json in local storage
+                pending_folder_path = None
                 if self._storage:
                     try:
                         self._storage.save_content(plan_code, gid, {
@@ -1836,11 +1829,38 @@ class ContentGenerationHandler:
                             "content_form": content_fields["内容形态"],
                             "title": "", "body": "", "tags": "",
                         }, {})
-                        # Write local folder path back to Feishu record
-                        folder_path = str(self._storage.get_content_path(plan_code, gid))
-                        f.update_record(table_content, content_record_id, {"素材文件夹路径": folder_path})
+                        pending_folder_path = str(self._storage.get_content_path(plan_code, gid))
                     except Exception:
                         logger.warning("LocalStorage save_content failed for %s", gid, exc_info=True)
+
+            content_record_ids.append(content_record_id)
+            group_runtime[gid] = {
+                "content_code": content_code,
+                "content_record_id": content_record_id,
+                "is_img": is_img,
+                "skip_generation": skip_generation,
+                "created_new": created_new,
+                "pending_folder_path": pending_folder_path,
+            }
+
+        for runtime in group_runtime.values():
+            folder_path = runtime.get("pending_folder_path")
+            if not folder_path:
+                continue
+            try:
+                f.update_record(table_content, runtime["content_record_id"], {"素材文件夹路径": folder_path})
+            except Exception:
+                logger.warning("Failed to write 素材文件夹路径 for %s", runtime["content_code"], exc_info=True)
+
+        # Phase B: generate text/images against the already-visible 表4 batch.
+        for g in groups:
+            gid = g["group_id"]
+            runtime = group_runtime[gid]
+            content_code = runtime["content_code"]
+            content_record_id = runtime["content_record_id"]
+            is_img = runtime["is_img"]
+            if runtime["skip_generation"]:
+                continue
 
             # Get text prompt
             c_pr = pr_map.get((gid, "C"))

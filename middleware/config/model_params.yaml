@@ -33,6 +33,18 @@ image_model:
       model: gemini-3.1-flash-image-preview
       aspect_ratio: "9:16"
       image_size: "1K"
+    gemini-3.1-flash-image-preview:
+      api_key: ${XIAOLE_API_KEY}
+      base_url: ${XIAOLE_BASE_URL}
+      endpoint: ${XIAOLE_IMAGE_ENDPOINT}
+      model: gemini-3.1-flash-image-preview
+      aspect_ratio: "9:16"
+    gemini-3-pro-image-preview:
+      api_key: ${XIAOLE_API_KEY}
+      base_url: ${XIAOLE_BASE_URL}
+      endpoint: ${XIAOLE_IMAGE_ENDPOINT}
+      model: gemini-3-pro-image-preview
+      aspect_ratio: "9:16"
     volcengine-seedream:
       api_key: ${VOLCENGINE_API_KEY}
       base_url: https://ark.cn-beijing.volces.com/api/v3

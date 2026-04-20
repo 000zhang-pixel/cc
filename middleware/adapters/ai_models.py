@@ -318,6 +318,85 @@ class ImageModelAdapter:
             results.append(self.generate(combined, ref_images=ref_images))
         return results
 
+class XiaoleImageAdapter:
+    """Calls Xiaole's image proxy API and returns raw image bytes.
+
+    Xiaole's `/v1/image/created` endpoint is not Gemini-style, but it does accept
+    reference images when passed as `reference_images=[{"mime_type", "b64_json"}]`.
+    We use that to preserve the existing 白底图 product-consistency workflow.
+    """
+
+    def __init__(self, cfg: dict, shared_cfg: dict):
+        self._api_key = cfg["api_key"]
+        self._base_url = cfg.get("base_url", "https://api.xiaoleai.team").rstrip("/")
+        self._endpoint = cfg.get("endpoint", "/v1/image/created")
+        self._model = cfg.get("model", "gemini-3.1-flash-image-preview")
+        self._aspect_ratio = cfg.get("aspect_ratio", "9:16")
+        self._semaphore = _get_semaphore("image", shared_cfg["max_concurrency"])
+        self._retry_max = shared_cfg["retry_max"]
+        self._retry_base = shared_cfg["retry_base_seconds"]
+
+    def _generate_url(self) -> str:
+        endpoint = self._endpoint.strip() or "/v1/image/created"
+        if not endpoint.startswith("/"):
+            endpoint = f"/{endpoint}"
+        return f"{self._base_url}{endpoint}"
+
+    def generate(self, prompt: str, ref_images: list[bytes] | None = None) -> bytes:
+        url = self._generate_url()
+        payload = {
+            "model": self._model,
+            "prompt": prompt,
+            "response_format": "b64_json",
+            "aspect_ratio": self._aspect_ratio,
+            "n": 1,
+        }
+        if ref_images:
+            payload["reference_images"] = [
+                {
+                    "mime_type": ImageModelAdapter._detect_mime(img_bytes),
+                    "b64_json": base64.b64encode(img_bytes).decode("utf-8"),
+                }
+                for img_bytes in ref_images
+            ]
+        headers = {
+            "Authorization": f"Bearer {self._api_key}",
+            "Content-Type": "application/json",
+        }
+
+        def _call():
+            with self._semaphore:
+                with httpx.Client(timeout=180) as client:
+                    resp = client.post(url, headers=headers, json=payload)
+                    resp.raise_for_status()
+                    data = resp.json()
+                    items = data.get("data") or []
+                    if not items:
+                        raise RuntimeError(f"Xiaole: no image data in response: {data}")
+                    first = items[0]
+                    if first.get("b64_json"):
+                        return base64.b64decode(first["b64_json"])
+                    if first.get("url"):
+                        dl = client.get(first["url"], timeout=60)
+                        dl.raise_for_status()
+                        return dl.content
+                    raise RuntimeError(f"Xiaole: unsupported response payload: {data}")
+
+        return _with_retry(_call, self._retry_max, self._retry_base)
+
+    def generate_sequential(
+        self,
+        master_prompt: str,
+        sub_prompts: list[str],
+        ref_images: list[bytes] | None = None,
+    ) -> list[bytes]:
+        results = []
+        for sub in sub_prompts:
+            combined = f"{master_prompt}\n\n---\n\n{sub}"
+            results.append(self.generate(combined, ref_images=ref_images))
+        return results
+
+
 class VolcEngineImageAdapter:
     """
     Calls Volcano Engine ARK image generation API (doubao-seedream series).
@@ -579,6 +658,8 @@ def build_image_adapter(model_params: dict, provider_name: str = None):
         )
     if "volcengine" in provider_name:
         return VolcEngineImageAdapter(provider_cfg, cfg_root)
+    if provider_cfg.get("endpoint"):
+        return XiaoleImageAdapter(provider_cfg, cfg_root)
     return ImageModelAdapter(provider_cfg, cfg_root)
 
 

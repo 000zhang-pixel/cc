@@ -3,6 +3,7 @@ logs/
 workspace/
 middleware/.env
 middleware/venv/
+middleware/.venv/
 __pycache__/
 *.pyc
 

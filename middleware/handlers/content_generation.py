@@ -1550,7 +1550,7 @@ class ContentGenerationHandler:
                 )
                 # Update brief with resolved strategy_id for observability
                 if brief and strategy:
-                    brief["strategy_id"] = strategy.get("record_id", "")
+                    brief["strategy_id"] = self._feishu.get_text(strategy, "策略编号") or strategy.get("record_id", "")
                 if strategy:
                     _group_index = c_group_index_map.get(gid, 1)
                     _system_prompt, user_prompt = self._build_text_prompts_from_strategy(
@@ -1581,7 +1581,7 @@ class ContentGenerationHandler:
                     shotplan = self._lookup_shotplan("图片", content_type, category)
                             # Update brief with resolved shotplan_id for observability
                     if brief and shotplan:
-                        brief["shotplan_id"] = shotplan.get("record_id", "")
+                        brief["shotplan_id"] = self._feishu.get_text(shotplan, "方案编号") or shotplan.get("record_id", "")
                     master = self._build_image_master_prompt(
                         strategy, sku_fields, scene, persona=persona, brief=brief
                     )

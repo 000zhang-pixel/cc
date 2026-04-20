@@ -2,8 +2,10 @@
 FeishuSyncer — pulls records from Feishu Bitable into local SQLite.
 
 Strategy:
-  - Full sync on first run (sync_cursors has no entry).
-  - Incremental sync on subsequent runs: only records updated after last_sync_at.
+  - Default mode is full-scan because Feishu system modification-time fields are
+    not reliably filterable in bitable formulas.
+  - Optional legacy formula-based incremental mode can be re-enabled via
+    FEISHU_SYNC_MODE=formula_modified_time for targeted experiments/debugging.
   - State fields (exec_status, gen_status, pub_status, etc.) are NEVER overwritten
     from Feishu — local DB is authoritative for those.
   - All other fields use Feishu as source of truth.
@@ -15,6 +17,7 @@ Usage:
 """
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Any
 
@@ -78,6 +81,15 @@ def _linked_record_ids(val: Any) -> list[str]:
 
 
 class FeishuSyncer:
+    _NATURAL_KEY_FIELDS = {
+        Sku: ("sku_code",),
+        Plan: ("plan_code",),
+        Content: ("content_code",),
+        PublishRecord: ("pub_code",),
+        Material: ("material_code",),
+        Tag: ("tag_code", "tag_name"),
+    }
+
     def __init__(self, feishu, table_ids: dict, engine=None):
         """
         feishu: FeishuClient instance
@@ -87,6 +99,39 @@ class FeishuSyncer:
         self.feishu = feishu
         self.table_ids = table_ids
         self.engine = engine or make_engine()
+        self.sync_mode = (os.environ.get("FEISHU_SYNC_MODE", "full_scan") or "full_scan").strip().lower()
+        if self.sync_mode not in {"full_scan", "formula_modified_time"}:
+            raise RuntimeError(
+                f"Unsupported FEISHU_SYNC_MODE={self.sync_mode!r}; expected 'full_scan' or 'formula_modified_time'"
+            )
+
+    def _identity_key(self, model_cls, obj):
+        for field_name in self._NATURAL_KEY_FIELDS.get(model_cls, ()): 
+            value = getattr(obj, field_name, None)
+            if value:
+                return (field_name, value)
+        record_id = getattr(obj, "feishu_record_id", None)
+        if record_id:
+            return ("feishu_record_id", record_id)
+        return None
+
+    def _find_existing(self, session: Session, model_cls, obj):
+        record_id = getattr(obj, "feishu_record_id", None)
+        if record_id:
+            existing = session.execute(
+                select(model_cls).where(model_cls.feishu_record_id == record_id)
+            ).scalar_one_or_none()
+            if existing:
+                return existing
+
+        identity = self._identity_key(model_cls, obj)
+        if not identity or identity[0] == "feishu_record_id":
+            return None
+
+        field_name, value = identity
+        return session.execute(
+            select(model_cls).where(getattr(model_cls, field_name) == value)
+        ).scalar_one_or_none()
 
     # ------------------------------------------------------------------
     # Public API
@@ -160,13 +205,15 @@ class FeishuSyncer:
             cursor = session.get(SyncCursor, cursor_key)
             last_sync = cursor.last_sync_at if cursor else None
 
-        logger.info("[Sync] %s — last_sync=%s", cursor_key, last_sync)
+        logger.info("[Sync] %s — last_sync=%s mode=%s", cursor_key, last_sync, self.sync_mode)
 
-        # Full table scan: Feishu bitable's formula filter does not support system
-        # modification-time fields reliably, so we always fetch all records and let
-        # the upsert logic skip unchanged ones.
+        filter_str = None
+        if self.sync_mode == "formula_modified_time" and last_sync:
+            ts_ms = int(last_sync.timestamp() * 1000)
+            filter_str = f'CurrentValue.[修改时间]>{ts_ms}'
+
         try:
-            records = self.feishu.list_records(table_id=table_id)
+            records = self.feishu.list_records(table_id=table_id, filter_str=filter_str)
         except Exception as e:
             logger.error("[Sync] %s fetch failed: %s", cursor_key, e)
             return
@@ -177,6 +224,7 @@ class FeishuSyncer:
             return
 
         upserted = 0
+        seen_identity_keys: set[tuple[str, str]] = set()
         with Session(self.engine) as session:
             for raw in records:
                 try:
@@ -184,13 +232,25 @@ class FeishuSyncer:
                         obj = mapper(raw, session)
                         if obj is None:
                             continue
-                        existing = session.execute(
-                            select(model_cls).where(
-                                model_cls.feishu_record_id == raw["record_id"]
+
+                        identity_key = self._identity_key(model_cls, obj)
+                        if identity_key and identity_key in seen_identity_keys:
+                            logger.info(
+                                "[Sync] %s skipped duplicate remote record for %s=%s (record_id=%s)",
+                                cursor_key,
+                                identity_key[0],
+                                identity_key[1],
+                                raw.get("record_id"),
                             )
-                        ).scalar_one_or_none()
+                            continue
+                        if identity_key:
+                            seen_identity_keys.add(identity_key)
+
+                        existing = self._find_existing(session, model_cls, obj)
 
                         if existing:
+                            previous_record_id = getattr(existing, "feishu_record_id", None)
+                            record_id_changed = previous_record_id != raw["record_id"]
                             # Update non-status fields only
                             for k, v in vars(obj).items():
                                 if k.startswith("_"):
@@ -199,6 +259,14 @@ class FeishuSyncer:
                                     continue  # never overwrite local status
                                 setattr(existing, k, v)
                             existing.synced_at = datetime.utcnow()
+                            if record_id_changed:
+                                logger.info(
+                                    "[Sync] %s remapped %s natural key to new feishu_record_id: %s -> %s",
+                                    cursor_key,
+                                    model_cls.__name__,
+                                    previous_record_id,
+                                    raw["record_id"],
+                                )
                         else:
                             obj.synced_at = datetime.utcnow()
                             session.add(obj)

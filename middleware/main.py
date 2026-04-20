@@ -57,16 +57,16 @@ _SYNC_INTERVAL = 300  # 5 minutes
 
 
 def _start_sync_timer(syncer: FeishuSyncer):
-    """Run incremental sync every _SYNC_INTERVAL seconds in a daemon thread."""
+    """Run the periodic sync strategy every _SYNC_INTERVAL seconds in a daemon thread."""
     def _loop():
         import time
         while True:
             time.sleep(_SYNC_INTERVAL)
             try:
-                logger.info("[Sync] Incremental sync started")
-                syncer.sync_all()
+                logger.info("[Sync] Periodic sync cycle started")
+                syncer.sync_all(reason="periodic")
             except Exception as e:
-                logger.error("[Sync] Incremental sync failed: %s", e)
+                logger.error("[Sync] Periodic sync cycle failed: %s", e)
 
     t = threading.Thread(target=_loop, daemon=True, name="feishu-syncer")
     t.start()
@@ -115,8 +115,8 @@ def main():
     # --- Initial full sync from Feishu ---
     syncer = FeishuSyncer(feishu, tables, engine)
     try:
-        logger.info("[Sync] Running startup sync…")
-        syncer.sync_all()
+        logger.info("[Sync] Running startup full sync…")
+        syncer.sync_all(reason="startup")
     except Exception as e:
         logger.error("[Sync] Startup sync failed (non-fatal): %s", e)
 

@@ -2,10 +2,11 @@
 FeishuSyncer — pulls records from Feishu Bitable into local SQLite.
 
 Strategy:
-  - Default mode is full-scan because Feishu system modification-time fields are
-    not reliably filterable in bitable formulas.
-  - Optional legacy formula-based incremental mode can be re-enabled via
-    FEISHU_SYNC_MODE=formula_modified_time for targeted experiments/debugging.
+  - Default mode is hybrid: startup always does a full scan, periodic runs use
+    formula-based incremental sync when a cursor exists, and a scheduled full
+    rescan is performed every FEISHU_SYNC_FULL_SCAN_EVERY cycles as a safety net.
+  - FEISHU_SYNC_MODE can still be forced to full_scan or formula_modified_time
+    for debugging/experiments.
   - State fields (exec_status, gen_status, pub_status, etc.) are NEVER overwritten
     from Feishu — local DB is authoritative for those.
   - All other fields use Feishu as source of truth.
@@ -99,11 +100,16 @@ class FeishuSyncer:
         self.feishu = feishu
         self.table_ids = table_ids
         self.engine = engine or make_engine()
-        self.sync_mode = (os.environ.get("FEISHU_SYNC_MODE", "full_scan") or "full_scan").strip().lower()
-        if self.sync_mode not in {"full_scan", "formula_modified_time"}:
+        self.sync_mode = (os.environ.get("FEISHU_SYNC_MODE", "hybrid") or "hybrid").strip().lower()
+        if self.sync_mode not in {"full_scan", "formula_modified_time", "hybrid"}:
             raise RuntimeError(
-                f"Unsupported FEISHU_SYNC_MODE={self.sync_mode!r}; expected 'full_scan' or 'formula_modified_time'"
+                f"Unsupported FEISHU_SYNC_MODE={self.sync_mode!r}; expected 'full_scan', 'formula_modified_time', or 'hybrid'"
             )
+        self._hybrid_full_scan_every = max(
+            0,
+            int((os.environ.get("FEISHU_SYNC_FULL_SCAN_EVERY", "12") or "12").strip() or "12"),
+        )
+        self._periodic_run_count = 0
 
     def _identity_key(self, model_cls, obj):
         for field_name in self._NATURAL_KEY_FIELDS.get(model_cls, ()): 
@@ -137,78 +143,128 @@ class FeishuSyncer:
     # Public API
     # ------------------------------------------------------------------
 
-    def sync_all(self):
-        """Sync all tables sequentially. Safe to call on startup."""
-        logger.info("[Sync] Starting full sync of all tables")
-        self.sync_skus()
-        self.sync_plans()
-        self.sync_contents()
-        self.sync_publish_records()
-        self.sync_materials()
-        self.sync_tags()
-        logger.info("[Sync] All tables synced")
+    def _resolve_run_mode(self, *, reason: str, force_mode: str | None) -> str:
+        if force_mode:
+            return force_mode
+        if reason == "startup":
+            return "full_scan"
+        if self.sync_mode != "hybrid":
+            return self.sync_mode
+        if self._hybrid_full_scan_every and self._periodic_run_count % self._hybrid_full_scan_every == 0:
+            return "full_scan"
+        return "formula_modified_time"
 
-    def sync_skus(self):
+    def _run_label(self, *, reason: str, run_mode: str) -> str:
+        if reason == "startup":
+            return "startup full sync"
+        if reason == "periodic" and self.sync_mode == "hybrid":
+            if run_mode == "full_scan":
+                return "periodic hybrid sync (scheduled full rescan)"
+            return "periodic hybrid sync"
+        if reason == "periodic":
+            return f"periodic {run_mode} sync"
+        if reason == "manual":
+            return f"manual {run_mode} sync"
+        return f"{reason} {run_mode} sync"
+
+    def sync_all(self, *, reason: str = "manual", force_mode: str | None = None):
+        """Sync all tables sequentially. Safe to call on startup or periodically."""
+        if reason == "periodic":
+            self._periodic_run_count += 1
+        run_mode = self._resolve_run_mode(reason=reason, force_mode=force_mode)
+        logger.info("[Sync] Starting %s of all tables", self._run_label(reason=reason, run_mode=run_mode))
+        self.sync_skus(run_mode=run_mode, reason=reason)
+        self.sync_plans(run_mode=run_mode, reason=reason)
+        self.sync_contents(run_mode=run_mode, reason=reason)
+        self.sync_publish_records(run_mode=run_mode, reason=reason)
+        self.sync_materials(run_mode=run_mode, reason=reason)
+        self.sync_tags(run_mode=run_mode, reason=reason)
+        logger.info("[Sync] All tables synced (%s)", self._run_label(reason=reason, run_mode=run_mode))
+
+    def sync_skus(self, *, run_mode: str | None = None, reason: str = "manual"):
         self._sync_table(
             cursor_key="feishu_sku",
             table_id=self.table_ids["sku"],
             mapper=self._map_sku,
             model_cls=Sku,
+            run_mode=run_mode,
+            reason=reason,
         )
 
-    def sync_plans(self):
+    def sync_plans(self, *, run_mode: str | None = None, reason: str = "manual"):
         self._sync_table(
             cursor_key="feishu_plan",
             table_id=self.table_ids["plan"],
             mapper=self._map_plan,
             model_cls=Plan,
+            run_mode=run_mode,
+            reason=reason,
         )
 
-    def sync_contents(self):
+    def sync_contents(self, *, run_mode: str | None = None, reason: str = "manual"):
         self._sync_table(
             cursor_key="feishu_content",
             table_id=self.table_ids["content"],
             mapper=self._map_content,
             model_cls=Content,
+            run_mode=run_mode,
+            reason=reason,
         )
 
-    def sync_publish_records(self):
+    def sync_publish_records(self, *, run_mode: str | None = None, reason: str = "manual"):
         self._sync_table(
             cursor_key="feishu_publish",
             table_id=self.table_ids["publish"],
             mapper=self._map_publish_record,
             model_cls=PublishRecord,
+            run_mode=run_mode,
+            reason=reason,
         )
 
-    def sync_materials(self):
+    def sync_materials(self, *, run_mode: str | None = None, reason: str = "manual"):
         self._sync_table(
             cursor_key="feishu_material",
             table_id=self.table_ids["material"],
             mapper=self._map_material,
             model_cls=Material,
+            run_mode=run_mode,
+            reason=reason,
         )
 
-    def sync_tags(self):
+    def sync_tags(self, *, run_mode: str | None = None, reason: str = "manual"):
         self._sync_table(
             cursor_key="feishu_tag",
             table_id=self.table_ids["tag"],
             mapper=self._map_tag,
             model_cls=Tag,
+            run_mode=run_mode,
+            reason=reason,
         )
 
     # ------------------------------------------------------------------
     # Core sync engine
     # ------------------------------------------------------------------
 
-    def _sync_table(self, cursor_key: str, table_id: str, mapper, model_cls):
+    def _sync_table(self, cursor_key: str, table_id: str, mapper, model_cls, *, run_mode: str | None = None, reason: str = "manual"):
         with Session(self.engine) as session:
             cursor = session.get(SyncCursor, cursor_key)
             last_sync = cursor.last_sync_at if cursor else None
 
-        logger.info("[Sync] %s — last_sync=%s mode=%s", cursor_key, last_sync, self.sync_mode)
+        effective_mode = run_mode or self._resolve_run_mode(reason=reason, force_mode=None)
+        if effective_mode == "formula_modified_time" and not last_sync:
+            effective_mode = "full_scan"
+
+        logger.info(
+            "[Sync] %s — last_sync=%s configured_mode=%s effective_mode=%s reason=%s",
+            cursor_key,
+            last_sync,
+            self.sync_mode,
+            effective_mode,
+            reason,
+        )
 
         filter_str = None
-        if self.sync_mode == "formula_modified_time" and last_sync:
+        if effective_mode == "formula_modified_time" and last_sync:
             ts_ms = int(last_sync.timestamp() * 1000)
             filter_str = f'CurrentValue.[修改时间]>{ts_ms}'
 

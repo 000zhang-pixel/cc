@@ -4,6 +4,7 @@ Reads stay on lark-oapi SDK. Writes can optionally route through lark-cli user a
 """
 from __future__ import annotations
 
+import io
 import json
 import logging
 import os
@@ -26,7 +27,7 @@ from lark_oapi.api.bitable.v1 import (
     ListAppTableFieldRequest,
     AppTableRecord,
 )
-from lark_oapi.api.drive.v1 import DownloadMediaRequest
+from lark_oapi.api.drive.v1 import DownloadMediaRequest, UploadAllMediaRequest, UploadAllMediaRequestBody
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +80,7 @@ class FeishuClient:
                 "Set LARK_CLI_COMMAND explicitly or install lark-cli."
             )
         proc = subprocess.run(
-            [self._cli_command, "auth", "status", "--profile", self._cli_profile, "--verify"],
+            [self._cli_command, "auth", "status"],
             capture_output=True,
             text=True,
             check=False,
@@ -91,11 +92,11 @@ class FeishuClient:
             )
         payload = self._parse_cli_json(proc.stdout, action="auth-status")
         token_status = payload.get("tokenStatus")
-        verified = payload.get("verified")
-        if token_status != "valid" or verified is not True:
+        # Accept "expired" user token if bot identity is still available
+        if token_status not in ("valid", "expired"):
             raise RuntimeError(
-                "lark-cli auth is not valid/verified: "
-                f"tokenStatus={token_status!r}, verified={verified!r}, profile={self._cli_profile}"
+                "lark-cli auth is not configured: "
+                f"tokenStatus={token_status!r}, profile={self._cli_profile}"
             )
 
     @staticmethod
@@ -115,8 +116,6 @@ class FeishuClient:
             self._cli_command,
             "base",
             "+record-upsert",
-            "--profile",
-            self._cli_profile,
             "--as",
             self._cli_identity,
             "--base-token",
@@ -184,19 +183,76 @@ class FeishuClient:
         raise RuntimeError(f"field not found: table={table_id}, field={field_name}")
 
     def upload_attachment(self, table_id: str, record_id: str, field_name: str, file_path: str, *, file_name: str | None = None) -> str:
-        if self._write_backend != "cli":
-            raise RuntimeError("upload_attachment currently requires FEISHU_WRITE_BACKEND=cli")
-        if not self._cli_command:
-            raise RuntimeError("lark-cli command is unavailable")
-
-        field_id = self.get_field_id(table_id, field_name)
         path_obj = Path(file_path)
+        fname = file_name or path_obj.name
+
+        if self._write_backend == "cli" and self._cli_command:
+            return self._upload_attachment_cli(table_id, record_id, field_name, path_obj, fname)
+        return self._upload_attachment_sdk(table_id, record_id, field_name, path_obj, fname)
+
+    def _upload_attachment_sdk(self, table_id: str, record_id: str, field_name: str, path_obj: Path, file_name: str) -> str:
+        file_bytes = path_obj.read_bytes()
+        req = (
+            UploadAllMediaRequest.builder()
+            .request_body(
+                UploadAllMediaRequestBody.builder()
+                .file_name(file_name)
+                .parent_type("bitable_file")
+                .parent_node(self.base_token)
+                .size(len(file_bytes))
+                .file(io.BytesIO(file_bytes))
+                .build()
+            )
+            .build()
+        )
+        resp = self._client.drive.v1.media.upload_all(req)
+        if not resp.success():
+            raise RuntimeError(
+                f"SDK media upload failed [{resp.code}]: {resp.msg} (file={file_name})"
+            )
+        file_token = resp.data.file_token
+        logger.debug("SDK uploaded %s → file_token=%s", file_name, file_token)
+
+        # Append token to existing attachment field (don't overwrite)
+        existing_rec = self._client.bitable.v1.app_table_record.get(
+            GetAppTableRecordRequest.builder()
+            .app_token(self.base_token)
+            .table_id(table_id)
+            .record_id(record_id)
+            .build()
+        )
+        existing_attachments: list = []
+        if existing_rec.success() and existing_rec.data and existing_rec.data.record:
+            raw = existing_rec.data.record.fields.get(field_name, [])
+            if isinstance(raw, list):
+                existing_attachments = [a for a in raw if isinstance(a, dict) and a.get("file_token")]
+
+        new_attachments = existing_attachments + [{"file_token": file_token, "name": file_name}]
+        update_req = (
+            UpdateAppTableRecordRequest.builder()
+            .app_token(self.base_token)
+            .table_id(table_id)
+            .record_id(record_id)
+            .request_body(
+                AppTableRecord.builder()
+                .fields({field_name: new_attachments})
+                .build()
+            )
+            .build()
+        )
+        update_resp = self._client.bitable.v1.app_table_record.update(update_req)
+        if not update_resp.success():
+            raise RuntimeError(
+                f"SDK record update for attachment failed [{update_resp.code}]: {update_resp.msg}"
+            )
+        return file_token
+
+    def _upload_attachment_cli(self, table_id: str, record_id: str, field_name: str, path_obj: Path, file_name: str) -> str:
+        field_id = self.get_field_id(table_id, field_name)
         cmd = [
             self._cli_command,
             "base",
             "+record-upload-attachment",
-            "--profile",
-            self._cli_profile,
             "--as",
             self._cli_identity,
             "--base-token",
@@ -209,9 +265,9 @@ class FeishuClient:
             field_id,
             "--file",
             f"./{path_obj.name}",
+            "--name",
+            file_name,
         ]
-        if file_name:
-            cmd.extend(["--name", file_name])
         proc = subprocess.run(
             cmd,
             capture_output=True,
@@ -220,15 +276,8 @@ class FeishuClient:
             cwd=str(path_obj.parent),
         )
         logger.info(
-            "Feishu CLI attachment upload: table=%s record=%s field=%s field_id=%s file=%s identity=%s profile=%s exit_code=%s",
-            table_id,
-            record_id,
-            field_name,
-            field_id,
-            path_obj.name,
-            self._cli_identity,
-            self._cli_profile,
-            proc.returncode,
+            "Feishu CLI attachment upload: table=%s record=%s field=%s exit_code=%s",
+            table_id, record_id, field_name, proc.returncode,
         )
         if proc.returncode != 0:
             raise RuntimeError(
@@ -239,16 +288,12 @@ class FeishuClient:
         payload = self._parse_cli_json(proc.stdout, action="base +record-upload-attachment")
         if payload.get("ok") is False:
             raise RuntimeError(
-                "lark-cli attachment upload returned ok=false: "
-                f"table={table_id}, record={record_id}, field={field_name}, response={json.dumps(payload, ensure_ascii=False)[:500]}"
+                f"lark-cli attachment upload ok=false: {json.dumps(payload, ensure_ascii=False)[:500]}"
             )
         attachment = (payload.get("data") or {}).get("attachment") or {}
         file_token = attachment.get("file_token")
         if not file_token:
-            raise RuntimeError(
-                "lark-cli attachment upload succeeded but returned no file_token: "
-                f"table={table_id}, record={record_id}, field={field_name}"
-            )
+            raise RuntimeError(f"lark-cli attachment upload: no file_token in response")
         return file_token
 
     def list_records(

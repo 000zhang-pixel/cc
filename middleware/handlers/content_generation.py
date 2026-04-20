@@ -1996,12 +1996,21 @@ class ContentGenerationHandler:
                     is_nanobanana = hasattr(img_adapter, "generate_sequential")
                     for idx in range(img_count):
                         img_filename = f"img_{idx+1:02d}.jpg"
-                        # Skip images already saved locally (handles partial-failure retry)
+                        # Re-upload images already saved locally (handles partial-failure retry)
                         if self._storage:
                             local_img = self._storage.get_content_path(plan_code, gid) / img_filename
                             if local_img.exists():
-                                logger.info("Image %d already saved locally for %s, skipping", idx+1, gid)
-                                attachment_tokens.append(f"__local__{img_filename}")
+                                logger.info("Image %d already saved locally for %s, uploading", idx+1, gid)
+                                token = self._upload_attachment(
+                                    table_content, content_record_id,
+                                    f"{content_code}_img{idx+1:02d}.jpg",
+                                    local_img.read_bytes(),
+                                )
+                                if token:
+                                    attachment_tokens.append(token)
+                                else:
+                                    failed_count += 1
+                                    logger.warning("Image %d upload returned no token for %s (local file)", idx+1, gid)
                                 continue
                         sub_p = sub_prompts[idx]
                         combined = f"{i_prompt_text}\n\n---\n\n{sub_p}"
@@ -2042,9 +2051,13 @@ class ContentGenerationHandler:
                                     pass
 
                     if not fail_reason and not attachment_tokens:
-                        fail_reason = f"图片生成全部失败（{img_count}张）"
+                        all_gen_failed = len(_image_failures) == img_count
+                        if all_gen_failed:
+                            fail_reason = f"图片生成全部失败（{img_count}张）"
+                        else:
+                            fail_reason = f"图片上传飞书失败（{img_count}张已生成，但未能上传）"
                     elif not fail_reason and failed_count > 0:
-                        fail_reason = f"部分图片失败：{failed_count}/{img_count} 张未生成"
+                        fail_reason = f"部分图片失败：{failed_count}/{img_count} 张未生成或上传"
 
                     # P1-4: Write image_prompts + image_failures to content.json debug block
                     if self._storage and (_image_prompts or _image_failures):

@@ -9,3 +9,9 @@ __pycache__/
 # SQLite transient files — WAL/SHM change constantly while middleware runs
 *.db-wal
 *.db-shm
+
+# Local content store — large binary files, not version controlled
+content-store/
+
+# SQLite DB — runtime state, not version controlled
+data/hub.db

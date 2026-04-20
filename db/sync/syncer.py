@@ -162,14 +162,11 @@ class FeishuSyncer:
 
         logger.info("[Sync] %s — last_sync=%s", cursor_key, last_sync)
 
-        # Build filter: only records updated after last sync (Feishu formula syntax)
-        filter_str = None
-        if last_sync:
-            ts_ms = int(last_sync.timestamp() * 1000)
-            filter_str = f'CurrentValue.[修改时间]>{ts_ms}'
-
+        # Full table scan: Feishu bitable's formula filter does not support system
+        # modification-time fields reliably, so we always fetch all records and let
+        # the upsert logic skip unchanged ones.
         try:
-            records = self.feishu.list_records(table_id=table_id, filter_str=filter_str)
+            records = self.feishu.list_records(table_id=table_id)
         except Exception as e:
             logger.error("[Sync] %s fetch failed: %s", cursor_key, e)
             return

@@ -44,7 +44,7 @@ class FeishuClient:
 
         self._write_backend = (os.environ.get("FEISHU_WRITE_BACKEND", "sdk") or "sdk").strip().lower()
         self._cli_profile = (os.environ.get("LARK_CLI_PROFILE", "ai-content-hub") or "ai-content-hub").strip()
-        self._cli_identity = (os.environ.get("LARK_CLI_IDENTITY", "user") or "user").strip()
+        self._cli_identity = (os.environ.get("LARK_CLI_IDENTITY", "user") or "user").strip().lower()
         self._cli_command = self._resolve_cli_command(os.environ.get("LARK_CLI_COMMAND"))
         self._field_id_cache: dict[tuple[str, str], str] = {}
 
@@ -55,6 +55,11 @@ class FeishuClient:
 
         if self._write_backend == "cli":
             self._verify_cli_auth()
+            if self._cli_profile:
+                logger.info(
+                    "LARK_CLI_PROFILE=%s is informational only for current lark-cli integration; commands run without --profile",
+                    self._cli_profile,
+                )
 
         logger.info(
             "Feishu client initialized (read_backend=sdk, write_backend=%s%s)",
@@ -92,12 +97,30 @@ class FeishuClient:
             )
         payload = self._parse_cli_json(proc.stdout, action="auth-status")
         token_status = payload.get("tokenStatus")
-        # Accept "expired" user token if bot identity is still available
-        if token_status not in ("valid", "expired"):
-            raise RuntimeError(
-                "lark-cli auth is not configured: "
-                f"tokenStatus={token_status!r}, profile={self._cli_profile}"
-            )
+        identity = (payload.get("identity") or "").strip().lower()
+        has_cli_identity = bool(identity) and bool(payload.get("appId"))
+        default_as = (payload.get("defaultAs") or "").strip().lower()
+
+        # Newer lark-cli builds may omit tokenStatus entirely when only bot identity
+        # is available. Treat a successful `auth status` response with a usable
+        # identity/appId as configured.
+        if token_status in ("valid", "expired") or has_cli_identity:
+            available_identities = {x for x in (identity, default_as) if x and x != "auto"}
+            if self._cli_identity and self._cli_identity not in available_identities:
+                fallback_identity = identity or (default_as if default_as != "auto" else "")
+                if fallback_identity:
+                    logger.warning(
+                        "Requested LARK_CLI_IDENTITY=%s is unavailable; falling back to %s",
+                        self._cli_identity,
+                        fallback_identity,
+                    )
+                    self._cli_identity = fallback_identity
+            return
+
+        raise RuntimeError(
+            "lark-cli auth is not configured: "
+            f"tokenStatus={token_status!r}, identity={identity!r}, profile={self._cli_profile}"
+        )
 
     @staticmethod
     def _parse_cli_json(stdout: str, action: str) -> dict:
@@ -108,6 +131,17 @@ class FeishuClient:
             return json.loads(text)
         except json.JSONDecodeError as exc:
             raise RuntimeError(f"lark-cli {action} returned non-JSON output: {text[:500]}") from exc
+
+    @staticmethod
+    def _cli_error_allows_sdk_fallback(message: str) -> bool:
+        normalized = (message or "").lower()
+        return any(token in normalized for token in (
+            "http 403",
+            "permission",
+            "you don't have permission",
+            "you do not have permission",
+            '"identity": "bot"',
+        ))
 
     def _run_cli_bitable_write(self, *, table_id: str, record_id: str | None, fields: dict) -> dict:
         if not self._cli_command:
@@ -186,9 +220,49 @@ class FeishuClient:
         path_obj = Path(file_path)
         fname = file_name or path_obj.name
 
+        existing_attachment = self._find_existing_attachment(table_id, record_id, field_name, fname)
+        if existing_attachment:
+            file_token = existing_attachment.get("file_token")
+            logger.info(
+                "Feishu attachment already exists, skipping duplicate upload: table=%s record=%s field=%s file=%s token=%s",
+                table_id,
+                record_id,
+                field_name,
+                fname,
+                file_token,
+            )
+            return file_token
+
         if self._write_backend == "cli" and self._cli_command:
-            return self._upload_attachment_cli(table_id, record_id, field_name, path_obj, fname)
+            try:
+                return self._upload_attachment_cli(table_id, record_id, field_name, path_obj, fname)
+            except RuntimeError as exc:
+                if not self._cli_error_allows_sdk_fallback(str(exc)):
+                    raise
+                logger.warning(
+                    "Falling back to SDK attachment upload after CLI failure: table=%s record=%s field=%s error=%s",
+                    table_id,
+                    record_id,
+                    field_name,
+                    exc,
+                )
         return self._upload_attachment_sdk(table_id, record_id, field_name, path_obj, fname)
+
+    def _get_existing_attachments(self, table_id: str, record_id: str, field_name: str) -> list[dict]:
+        record = self.get_record(table_id, record_id)
+        raw = record.get("fields", {}).get(field_name, [])
+        if not isinstance(raw, list):
+            return []
+        return [item for item in raw if isinstance(item, dict) and item.get("file_token")]
+
+    def _find_existing_attachment(self, table_id: str, record_id: str, field_name: str, file_name: str) -> dict | None:
+        normalized = (file_name or "").strip()
+        if not normalized:
+            return None
+        for attachment in self._get_existing_attachments(table_id, record_id, field_name):
+            if (attachment.get("name") or "").strip() == normalized:
+                return attachment
+        return None
 
     def _upload_attachment_sdk(self, table_id: str, record_id: str, field_name: str, path_obj: Path, file_name: str) -> str:
         file_bytes = path_obj.read_bytes()
@@ -213,19 +287,10 @@ class FeishuClient:
         file_token = resp.data.file_token
         logger.debug("SDK uploaded %s → file_token=%s", file_name, file_token)
 
-        # Append token to existing attachment field (don't overwrite)
-        existing_rec = self._client.bitable.v1.app_table_record.get(
-            GetAppTableRecordRequest.builder()
-            .app_token(self.base_token)
-            .table_id(table_id)
-            .record_id(record_id)
-            .build()
-        )
-        existing_attachments: list = []
-        if existing_rec.success() and existing_rec.data and existing_rec.data.record:
-            raw = existing_rec.data.record.fields.get(field_name, [])
-            if isinstance(raw, list):
-                existing_attachments = [a for a in raw if isinstance(a, dict) and a.get("file_token")]
+        # Append token to existing attachment field (don't overwrite). If the
+        # record cannot be read here, fail closed rather than risking an update
+        # that overwrites pre-existing attachments.
+        existing_attachments = self._get_existing_attachments(table_id, record_id, field_name)
 
         new_attachments = existing_attachments + [{"file_token": file_token, "name": file_name}]
         update_req = (
@@ -354,12 +419,23 @@ class FeishuClient:
     def update_record(self, table_id: str, record_id: str, fields: dict) -> None:
         """Update specific fields on an existing record."""
         if self._write_backend == "cli":
-            self._run_cli_bitable_write(
-                table_id=table_id,
-                record_id=record_id,
-                fields=fields,
-            )
-            return
+            try:
+                self._run_cli_bitable_write(
+                    table_id=table_id,
+                    record_id=record_id,
+                    fields=fields,
+                )
+                return
+            except RuntimeError as exc:
+                if not self._cli_error_allows_sdk_fallback(str(exc)):
+                    raise
+                logger.warning(
+                    "Falling back to SDK update_record after CLI failure: table=%s record=%s fields=%s error=%s",
+                    table_id,
+                    record_id,
+                    list(fields.keys()),
+                    exc,
+                )
 
         record = AppTableRecord.builder().fields(fields).build()
         resp = self._client.bitable.v1.app_table_record.update(
@@ -427,18 +503,28 @@ class FeishuClient:
     def create_record(self, table_id: str, fields: dict) -> str:
         """Create a new record and return its record_id."""
         if self._write_backend == "cli":
-            payload = self._run_cli_bitable_write(
-                table_id=table_id,
-                record_id=None,
-                fields=fields,
-            )
-            record_id = self._infer_created_record_id(table_id, fields, payload)
-            if not record_id:
-                raise RuntimeError(
-                    "Feishu create_record via CLI succeeded but response had no record_id and fallback lookup failed: "
-                    f"table={table_id}, response={json.dumps(payload, ensure_ascii=False)[:500]}"
+            try:
+                payload = self._run_cli_bitable_write(
+                    table_id=table_id,
+                    record_id=None,
+                    fields=fields,
                 )
-            return record_id
+                record_id = self._infer_created_record_id(table_id, fields, payload)
+                if not record_id:
+                    raise RuntimeError(
+                        "Feishu create_record via CLI succeeded but response had no record_id and fallback lookup failed: "
+                        f"table={table_id}, response={json.dumps(payload, ensure_ascii=False)[:500]}"
+                    )
+                return record_id
+            except RuntimeError as exc:
+                if not self._cli_error_allows_sdk_fallback(str(exc)):
+                    raise
+                logger.warning(
+                    "Falling back to SDK create_record after CLI failure: table=%s fields=%s error=%s",
+                    table_id,
+                    list(fields.keys()),
+                    exc,
+                )
 
         record = AppTableRecord.builder().fields(fields).build()
         resp = self._client.bitable.v1.app_table_record.create(

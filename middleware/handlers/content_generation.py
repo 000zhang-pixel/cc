@@ -43,6 +43,8 @@ _MODEL_NAME_MAP = {
     "Kimi K2.5":        "kimi-k2.5",
     "DeepSeek":         "deepseek",
     "Nanobanana 2":     "nanobanana-2",
+    "xiaole / gemini-3.1-flash-image-preview": "gemini-3.1-flash-image-preview",
+    "xiaole / gemini-3-pro-image-preview": "gemini-3-pro-image-preview",
     "volcengine-seedream": "volcengine-seedream",
     "volcengine-seedance": "volcengine-seedance",
     "Veo 3":            "veo-3",

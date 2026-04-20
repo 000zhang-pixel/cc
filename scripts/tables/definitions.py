@@ -157,7 +157,7 @@ TABLES: list[dict] = [
             {"field_name": "视频最长时长(秒)","type": NUMBER},
             {"field_name": "注入标签数(N)",  "type": NUMBER},
             {"field_name": "文案模型",       "type": SINGLE, "property": _opt(["gpt-5.4", "kimi-k2.5", "deepseek"])},
-            {"field_name": "图片模型",       "type": SINGLE, "property": _opt(["nanobanana-2", "volcengine-seedream"])},
+            {"field_name": "图片模型",       "type": SINGLE, "property": _opt(["nanobanana-2", "gemini-3.1-flash-image-preview", "gemini-3-pro-image-preview", "volcengine-seedream"])},
             {"field_name": "视频模型",       "type": SINGLE, "property": _opt(["veo-3", "volcengine-seedance"])},
             {"field_name": "确认执行",       "type": SINGLE, "property": _opt(["否", "是"])},
             {"field_name": "执行状态",       "type": SINGLE, "property": _opt(["待执行", "执行中", "完成", "失败"])},

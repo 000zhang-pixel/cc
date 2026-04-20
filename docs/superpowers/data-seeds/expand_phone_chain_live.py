@@ -681,8 +681,15 @@ def sync_table(fc: FeishuClient, plan: SyncPlan, apply: bool) -> dict[str, Any]:
             summary["create"] += 1
             summary["created_codes"].append(code)
             if apply:
-                record_id = fc.create_record(meta["id"], payload)
-                indexed[code] = {"record_id": record_id, "fields": payload}
+                try:
+                    record_id = fc.create_record(meta["id"], payload)
+                    indexed[code] = {"record_id": record_id, "fields": payload}
+                except RuntimeError as exc:
+                    refreshed = index_records(fc, plan.table_key)
+                    if code in refreshed:
+                        indexed = refreshed
+                    else:
+                        raise RuntimeError(f"create failed for {plan.table_key}:{code}: {exc}") from exc
             continue
         current_fields = existing.get("fields", {})
         delta = {k: v for k, v in payload.items() if current_fields.get(k) != v}

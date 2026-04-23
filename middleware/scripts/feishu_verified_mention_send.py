@@ -81,10 +81,15 @@ class RuntimeEnv:
     active_env_path: str
 
 
+def render_mention(target: MentionTarget) -> str:
+    return f'<at user_id="{target.canonical_open_id}">{target.display_name}</at>'
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Send Feishu message with mandatory mention verification")
     parser.add_argument("--label", required=True, help="workflow label, e.g. 接单/进展/风险/交付")
-    parser.add_argument("--target", required=True, help="target role/display name as defined in registry")
+    parser.add_argument("--target", required=True, help="primary target role/display name as defined in registry")
+    parser.add_argument("--next-owner", action="append", default=[], help="additional target(s) that must be real-mentioned as next owner / handoff target; repeatable")
     parser.add_argument("--text", required=True, help="message body after the mention")
     parser.add_argument("--chat", default="hermes_board", help="chat key in registry (default: hermes_board)")
     parser.add_argument("--identity", default="it_agent_app", help="sender identity key in registry")
@@ -209,11 +214,16 @@ def resolve_target(registry: Registry, requested: str) -> MentionTarget:
     raise KeyError(f"Target {requested!r} not found in registry")
 
 
-def build_text(label: str, target: MentionTarget, text: str) -> str:
+def build_text(label: str, target: MentionTarget, text: str, next_owners: list[MentionTarget] | None = None) -> str:
     normalized_text = text.strip()
     if not normalized_text:
         raise ValueError("--text cannot be empty")
-    return f"【{label.strip()}】<at user_id=\"{target.canonical_open_id}\">{target.display_name}</at> {normalized_text}"
+    prefix = f"【{label.strip()}】{render_mention(target)}"
+    suffix = ""
+    if next_owners:
+        owner_mentions = "、".join(render_mention(owner) for owner in next_owners)
+        suffix = f" 下一责任人：{owner_mentions}。"
+    return f"{prefix} {normalized_text}{suffix}"
 
 
 def send_message(token: str, chat: ChatTarget, text: str) -> dict[str, Any]:
@@ -264,6 +274,7 @@ def verify_message(
     chat: ChatTarget,
     sender_identity: SenderIdentity,
     target: MentionTarget,
+    next_owners: list[MentionTarget],
     allow_alias_name: bool,
 ) -> dict[str, Any]:
     message_data = unwrap_message_data(message_data)
@@ -277,15 +288,40 @@ def verify_message(
     mention_ids = [_extract_open_id(item.get("id")) for item in mentions if isinstance(item, dict)]
     mention_ids = [item for item in mention_ids if item]
 
-    acceptable_names = {target.display_name}
-    if allow_alias_name:
-        acceptable_names.update(target.aliases)
+    required_targets = [target, *next_owners]
+    target_checks = []
+    actual_mention_open_id = None
+    compat_mode = False
+    for index, required_target in enumerate(required_targets):
+        acceptable_names = {required_target.display_name}
+        if allow_alias_name:
+            acceptable_names.update(required_target.aliases)
+        allowed_open_ids = list(required_target.allowed_open_ids_for_sender(sender_identity.key))
+        mention_id_match = any(open_id in mention_ids for open_id in allowed_open_ids)
+        canonical_match = required_target.canonical_open_id in mention_ids
+        actual_match = next((open_id for open_id in mention_ids if open_id in allowed_open_ids), None)
+        if index == 0:
+            actual_mention_open_id = actual_match
+            compat_mode = bool(mention_id_match and not canonical_match)
+        target_checks.append(
+            {
+                "role_name": required_target.role_name,
+                "display_name": required_target.display_name,
+                "canonical_open_id": required_target.canonical_open_id,
+                "allowed_open_ids_for_sender": allowed_open_ids,
+                "mention_id_match": mention_id_match,
+                "mention_name_match": any(name in acceptable_names for name in mention_names),
+                "canonical_match": canonical_match,
+                "actual_mention_open_id": actual_match,
+                "is_primary": index == 0,
+            }
+        )
 
-    allowed_open_ids = list(target.allowed_open_ids_for_sender(sender_identity.key))
-    mention_id_match = any(open_id in mention_ids for open_id in allowed_open_ids)
-    canonical_match = target.canonical_open_id in mention_ids
-    actual_mention_open_id = next((open_id for open_id in mention_ids if open_id in allowed_open_ids), None)
-    compat_mode = bool(mention_id_match and not canonical_match)
+    primary_check = target_checks[0]
+    next_owner_checks = target_checks[1:]
+    all_required_mentions_match = all(
+        item["mention_id_match"] and item["mention_name_match"] for item in target_checks
+    )
 
     checks = {
         "chat_match": message_data.get("chat_id") == chat.chat_id,
@@ -293,9 +329,10 @@ def verify_message(
         "sender_id_match": sender_id == sender_identity.sender_id,
         "body_has_placeholder": "@_user_" in body_content,
         "mentions_non_empty": bool(mentions),
-        "mention_id_match": mention_id_match,
-        "mention_name_match": any(name in acceptable_names for name in mention_names),
-        "canonical_match": canonical_match,
+        "mention_id_match": primary_check["mention_id_match"],
+        "mention_name_match": primary_check["mention_name_match"],
+        "canonical_match": primary_check["canonical_match"],
+        "all_required_mentions_match": all_required_mentions_match,
     }
     ok = all(v for k, v in checks.items() if k != "canonical_match")
     result = {
@@ -310,6 +347,7 @@ def verify_message(
         "mention_ids": mention_ids,
         "actual_mention_open_id": actual_mention_open_id,
         "compat_mode": compat_mode,
+        "target_checks": target_checks,
         "expected": {
             "chat_id": chat.chat_id,
             "sender_type": sender_identity.sender_type,
@@ -318,7 +356,19 @@ def verify_message(
             "target_display_name": target.display_name,
             "target_aliases": list(target.aliases),
             "canonical_open_id": target.canonical_open_id,
-            "allowed_open_ids_for_sender": allowed_open_ids,
+            "allowed_open_ids_for_sender": primary_check["allowed_open_ids_for_sender"],
+            "next_owner_display_names": [item["display_name"] for item in next_owner_checks],
+            "next_owner_open_ids": [item["canonical_open_id"] for item in next_owner_checks],
+            "required_targets": [
+                {
+                    "role_name": item["role_name"],
+                    "display_name": item["display_name"],
+                    "canonical_open_id": item["canonical_open_id"],
+                    "allowed_open_ids_for_sender": item["allowed_open_ids_for_sender"],
+                    "is_primary": item["is_primary"],
+                }
+                for item in target_checks
+            ],
         },
     }
     if not ok:
@@ -337,7 +387,8 @@ def main() -> int:
         raise KeyError(f"Identity {args.identity!r} not found in registry")
     runtime_env = load_runtime_env(sender_identity)
     target = resolve_target(registry, args.target)
-    text = build_text(args.label, target, args.text)
+    next_owners = [resolve_target(registry, requested) for requested in args.next_owner]
+    text = build_text(args.label, target, args.text, next_owners)
 
     if args.dry_run:
         print(
@@ -351,6 +402,13 @@ def main() -> int:
                         **target.__dict__,
                         "allowed_open_ids_for_sender": list(target.allowed_open_ids_for_sender(sender_identity.key)),
                     },
+                    "next_owners": [
+                        {
+                            **owner.__dict__,
+                            "allowed_open_ids_for_sender": list(owner.allowed_open_ids_for_sender(sender_identity.key)),
+                        }
+                        for owner in next_owners
+                    ],
                     "rendered_text": text,
                 },
                 ensure_ascii=False,
@@ -370,6 +428,7 @@ def main() -> int:
             chat=chat,
             sender_identity=sender_identity,
             target=target,
+            next_owners=next_owners,
             allow_alias_name=args.allow_alias_name,
         )
         print(json.dumps({"mode": "verify_existing", "runtime_env": runtime_env.__dict__, **result}, ensure_ascii=False, indent=2))
@@ -390,6 +449,7 @@ def main() -> int:
         chat=chat,
         sender_identity=sender_identity,
         target=target,
+        next_owners=next_owners,
         allow_alias_name=args.allow_alias_name,
     )
     print(json.dumps({"mode": "send_and_verify", "runtime_env": runtime_env.__dict__, **result}, ensure_ascii=False, indent=2))

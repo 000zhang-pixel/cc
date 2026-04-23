@@ -59,7 +59,7 @@
 
 - [ ] `【接单】` → mention `Hermes_CEO`
 - [ ] `【进展】` → mention 协作对象
-- [ ] `【交付】` → mention 下一责任人
+- [ ] `【交付】` → mention 下一责任人（使用 `--next-owner`，并确认其出现在 `mentions[]`）
 
 每条必须留存：
 - `message_id`

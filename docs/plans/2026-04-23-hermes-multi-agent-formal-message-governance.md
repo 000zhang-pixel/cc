@@ -146,6 +146,19 @@ v2 推荐字段：
 
 凡涉及主责切换、协作交接、催办、仲裁、验收，都必须真实 mention 下一责任人。
 
+自 2026-04-24 起，formal wrapper 对此采用统一参数：
+
+```bash
+python3.11 middleware/scripts/feishu_formal_message.py \
+  交付 Hermes_CEO "已完成技术修复，待复核。" \
+  --next-owner 大C_内容总监
+```
+
+验收口径：
+- 主 target 与 `--next-owner` 都必须出现在消息 `mentions[]`
+- receipt 必须回传 `required_targets / next_owner_display_names / next_owner_open_ids`
+- 只在正文写“下一责任人：显示名”而没有真实 mention，不算正式交接完成
+
 ### 5.3 无 receipt 不算完成
 
 对 default / Hermes_CEO / 下一责任人的正式交付，不得只写“已完成”。必须给出 receipt 或至少回传 receipt 核心字段。

@@ -27,8 +27,9 @@ PRESET_SUFFIX = {
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="One-line formal Feishu message wrapper")
     parser.add_argument("label", help="接单/进展/风险/交付/催办/仲裁/结论")
-    parser.add_argument("target", help="registry target name, e.g. Hermes_CEO")
+    parser.add_argument("target", help="primary registry target name, e.g. Hermes_CEO")
     parser.add_argument("text", help="body text after the mention")
+    parser.add_argument("--next-owner", action="append", default=[], help="additional target(s) that must be real-mentioned as next owner / handoff target; repeatable")
     parser.add_argument("--chat", default="hermes_board", help="chat key in registry")
     parser.add_argument("--identity", default="it_agent_app", help="sender identity key in registry")
     parser.add_argument(
@@ -71,6 +72,8 @@ def build_receipt(delegate_stdout: Any, *, label: str, target: str, preset: str,
             "target_display_name": target_info.get("display_name"),
             "canonical_open_id": target_info.get("canonical_open_id") or target_info.get("open_id"),
             "allowed_open_ids_for_sender": target_info.get("allowed_open_ids_for_sender") or [],
+            "next_owner_display_names": [item.get("display_name") for item in (delegate_stdout.get("next_owners") or [])],
+            "next_owner_open_ids": [item.get("canonical_open_id") for item in (delegate_stdout.get("next_owners") or [])],
             "actual_mention_open_id": None,
             "compat_mode": False,
             "mention_verified": False,
@@ -94,6 +97,9 @@ def build_receipt(delegate_stdout: Any, *, label: str, target: str, preset: str,
             "target_display_name": expected.get("target_display_name"),
             "canonical_open_id": expected.get("canonical_open_id") or expected.get("target_open_id"),
             "allowed_open_ids_for_sender": expected.get("allowed_open_ids_for_sender") or [],
+            "next_owner_display_names": expected.get("next_owner_display_names") or [],
+            "next_owner_open_ids": expected.get("next_owner_open_ids") or [],
+            "required_targets": expected.get("required_targets") or [],
             "actual_mention_open_id": delegate_stdout.get("actual_mention_open_id"),
             "compat_mode": bool(delegate_stdout.get("compat_mode")),
             "mention_verified": bool(delegate_stdout.get("ok")),
@@ -120,6 +126,8 @@ def main() -> int:
         "--identity",
         args.identity,
     ]
+    for next_owner in args.next_owner:
+        cmd.extend(["--next-owner", next_owner])
     if args.dry_run:
         cmd.append("--dry-run")
 

@@ -96,7 +96,13 @@
 - [ ] 技能已更新
 - [ ] default / Hermes_CEO 已确认准入
 
+准入状态分级：
+- `healthy`：sender 正确，且目标命中 canonical 对象
+- `compat-verified`：sender 正确，目标未命中 canonical，但在 `allowed_open_ids_for_sender` allowlist 下验收通过
+- `blocked`：sender 不正确、mention 未通过、无 receipt，或不在 allowlist 内
+
 结论：
-- [ ] 允许进群正式协作
+- [ ] 允许进群正式协作（healthy）
+- [ ] 允许进群正式协作（compat-verified）
 - [ ] 仅允许观察，不允许正式回单
-- [ ] 打回重配
+- [ ] 打回重配（blocked）

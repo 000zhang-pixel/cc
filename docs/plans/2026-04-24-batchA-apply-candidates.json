@@ -1,0 +1,545 @@
+{
+  "generated_at": "2026-04-24T07:37:05.850761",
+  "tag": [
+    {
+      "record_id": "recvfOSrsjSGhM",
+      "table_id": "tblsnxUwqY1WgEAQ",
+      "field": "标签名称",
+      "before": "#新年礼物",
+      "suggested_action": "deprecate_or_replace_source_tag",
+      "after_if_soft_disable": "[DEPRECATED]#新年礼物"
+    },
+    {
+      "record_id": "recvfOSshrCzC8",
+      "table_id": "tblsnxUwqY1WgEAQ",
+      "field": "标签名称",
+      "before": "#数码礼物",
+      "suggested_action": "deprecate_or_replace_source_tag",
+      "after_if_soft_disable": "[DEPRECATED]#数码礼物"
+    }
+  ],
+  "content": [
+    {
+      "record_id": "recvh2ql9oqdze",
+      "table_id": "tblieT8ZK8HOQt0x",
+      "field": "标签",
+      "before": "#开箱推荐 #得物好物 #新年礼物 #潮玩好物 #得物数码",
+      "after": "#开箱推荐 #得物好物 #潮玩好物 #得物数码",
+      "removed_tokens": [
+        "#新年礼物"
+      ],
+      "内容编号": "T_260417_057_img01",
+      "标题": "穿搭的温柔注脚，是手机链在摇晃✨"
+    },
+    {
+      "record_id": "recvh2sRJPRNvr",
+      "table_id": "tblieT8ZK8HOQt0x",
+      "field": "标签",
+      "before": "#晒单 #学生党必备 #数码配件 #数码礼物 #买家秀",
+      "after": "#晒单 #学生党必备 #数码配件 #买家秀",
+      "removed_tokens": [
+        "#数码礼物"
+      ],
+      "内容编号": "T_260417_058_img01",
+      "标题": "穿搭的最后一笔：这条链让清冷感瞬间拉满✨"
+    },
+    {
+      "record_id": "recvh2sXjQJmbe",
+      "table_id": "tblieT8ZK8HOQt0x",
+      "field": "标签",
+      "before": "#开箱推荐 #得物好物 #新年礼物 #潮玩好物 #得物数码",
+      "after": "#开箱推荐 #得物好物 #潮玩好物 #得物数码",
+      "removed_tokens": [
+        "#新年礼物"
+      ],
+      "内容编号": "T_260417_057_img02",
+      "标题": "穿搭的温柔注脚，是这条会晃动的彩色小马✨"
+    },
+    {
+      "record_id": "recvh2tZQrM42r",
+      "table_id": "tblieT8ZK8HOQt0x",
+      "field": "标签",
+      "before": "#开箱推荐 #得物好物 #新年礼物 #潮玩好物 #得物数码",
+      "after": "#开箱推荐 #得物好物 #潮玩好物 #得物数码",
+      "removed_tokens": [
+        "#新年礼物"
+      ],
+      "内容编号": "T_260417_057_img03",
+      "标题": "穿搭的温柔句号，是这条会晃动的彩色童话✨"
+    },
+    {
+      "record_id": "recvh2u6NECtvj",
+      "table_id": "tblieT8ZK8HOQt0x",
+      "field": "标签",
+      "before": "#晒单 #学生党必备 #数码配件 #数码礼物 #买家秀",
+      "after": "#晒单 #学生党必备 #数码配件 #买家秀",
+      "removed_tokens": [
+        "#数码礼物"
+      ],
+      "内容编号": "T_260417_058_img02",
+      "标题": "穿搭的温柔注脚，是这条会摇晃的星星✨"
+    },
+    {
+      "record_id": "recvh2uUIcQMSa",
+      "table_id": "tblieT8ZK8HOQt0x",
+      "field": "标签",
+      "before": "#晒单 #学生党必备 #数码配件 #数码礼物 #买家秀",
+      "after": "#晒单 #学生党必备 #数码配件 #买家秀",
+      "removed_tokens": [
+        "#数码礼物"
+      ],
+      "内容编号": "T_260417_058_img03",
+      "标题": "穿搭的温柔注脚，是腕间垂落的星光✨"
+    },
+    {
+      "record_id": "recvhiZyiEXl0q",
+      "table_id": "tblieT8ZK8HOQt0x",
+      "field": "标签",
+      "before": "#简约风 #买家秀 #数码配件 #新年礼物 #潮玩好物",
+      "after": "#简约风 #买家秀 #数码配件 #潮玩好物",
+      "removed_tokens": [
+        "#新年礼物"
+      ],
+      "内容编号": "T_260418_060_img01",
+      "标题": "我的手机链，让书桌秒变ins治愈角落🌿"
+    },
+    {
+      "record_id": "recvhiZzAeqzxs",
+      "table_id": "tblieT8ZK8HOQt0x",
+      "field": "标签",
+      "before": "#简约风 #买家秀 #数码配件 #新年礼物 #潮玩好物",
+      "after": "#简约风 #买家秀 #数码配件 #潮玩好物",
+      "removed_tokens": [
+        "#新年礼物"
+      ],
+      "内容编号": "T_260418_060_img02",
+      "标题": "书店窗边那抹彩虹🌈，被问爆的手机链在这"
+    },
+    {
+      "record_id": "recvhjm5ha1Qjy",
+      "table_id": "tblieT8ZK8HOQt0x",
+      "field": "标签",
+      "before": "#买家秀 #学生党必备 #晒单 #新年礼物",
+      "after": "#买家秀 #学生党必备 #晒单",
+      "removed_tokens": [
+        "#新年礼物"
+      ],
+      "内容编号": "T_260419_063_img01",
+      "标题": "豹纹手机链一挂，我的ccd被问了10次链接"
+    },
+    {
+      "record_id": "recvhjmf5YOY32",
+      "table_id": "tblieT8ZK8HOQt0x",
+      "field": "标签",
+      "before": "#买家秀 #学生党必备 #晒单 #新年礼物",
+      "after": "#买家秀 #学生党必备 #晒单",
+      "removed_tokens": [
+        "#新年礼物"
+      ],
+      "内容编号": "T_260419_063_img02",
+      "标题": "挂上它，手机在草地上会发光✨"
+    },
+    {
+      "record_id": "recvhphz5w4s5m",
+      "table_id": "tblieT8ZK8HOQt0x",
+      "field": "标签",
+      "before": "#得物种草 #618好物 #得物推荐 #新年礼物 #买家秀",
+      "after": "#得物种草 #618好物 #得物推荐 #买家秀",
+      "removed_tokens": [
+        "#新年礼物"
+      ],
+      "内容编号": "T_260421_067_img02",
+      "标题": "工位变秀场，我的手机链被同事追着要链接🍉"
+    },
+    {
+      "record_id": "recvhphB1s76Da",
+      "table_id": "tblieT8ZK8HOQt0x",
+      "field": "标签",
+      "before": "#得物种草 #618好物 #得物推荐 #新年礼物 #买家秀",
+      "after": "#得物种草 #618好物 #得物推荐 #买家秀",
+      "removed_tokens": [
+        "#新年礼物"
+      ],
+      "内容编号": "T_260421_067_img03",
+      "标题": "通勤路上被问爆的彩色小马，社畜的快乐开关🐎"
+    },
+    {
+      "record_id": "recvhq7NDdCBmV",
+      "table_id": "tblieT8ZK8HOQt0x",
+      "field": "标签",
+      "before": "#得物数码 #买家秀 #手机配件 #潮流数码 #新年礼物",
+      "after": "#得物数码 #买家秀 #手机配件 #潮流数码",
+      "removed_tokens": [
+        "#新年礼物"
+      ],
+      "内容编号": "T_260421_069_img01",
+      "标题": "通勤党看过来！一根手机链让我地铁刷卡快人一步🚇"
+    },
+    {
+      "record_id": "recvhq7OYoGmvZ",
+      "table_id": "tblieT8ZK8HOQt0x",
+      "field": "标签",
+      "before": "#得物数码 #买家秀 #手机配件 #潮流数码 #新年礼物",
+      "after": "#得物数码 #买家秀 #手机配件 #潮流数码",
+      "removed_tokens": [
+        "#新年礼物"
+      ],
+      "内容编号": "T_260421_069_img02",
+      "标题": "地铁党必备！这根手机链让我拿咖啡刷卡两不误☕️"
+    },
+    {
+      "record_id": "recvhw4xcnNa0C",
+      "table_id": "tblieT8ZK8HOQt0x",
+      "field": "标签",
+      "before": "#买家秀 #得物好物分享 #数码配件 #新年礼物",
+      "after": "#买家秀 #得物好物分享 #数码配件",
+      "removed_tokens": [
+        "#新年礼物"
+      ],
+      "内容编号": "T_260422_071_img01",
+      "标题": "取咖啡时被问3次的手机链☕️"
+    },
+    {
+      "record_id": "recvhw4yMlHzac",
+      "table_id": "tblieT8ZK8HOQt0x",
+      "field": "标签",
+      "before": "#买家秀 #得物好物分享 #数码配件 #新年礼物",
+      "after": "#买家秀 #得物好物分享 #数码配件",
+      "removed_tokens": [
+        "#新年礼物"
+      ],
+      "内容编号": "T_260422_071_img02",
+      "标题": "出门前多花3秒，通勤心情好一倍🍩"
+    },
+    {
+      "record_id": "recvhw4AaR9dMl",
+      "table_id": "tblieT8ZK8HOQt0x",
+      "field": "标签",
+      "before": "#买家秀 #得物好物分享 #数码配件 #新年礼物",
+      "after": "#买家秀 #得物好物分享 #数码配件",
+      "removed_tokens": [
+        "#新年礼物"
+      ],
+      "内容编号": "T_260422_071_img03",
+      "标题": "逛商场才发现，手机链真的不能乱买🛍️"
+    },
+    {
+      "record_id": "recvhw4BpBuLsj",
+      "table_id": "tblieT8ZK8HOQt0x",
+      "field": "标签",
+      "before": "#买家秀 #得物好物分享 #数码配件 #新年礼物",
+      "after": "#买家秀 #得物好物分享 #数码配件",
+      "removed_tokens": [
+        "#新年礼物"
+      ],
+      "内容编号": "T_260422_071_img04",
+      "标题": "办公桌秒变ins风，靠这条手机链🍩"
+    },
+    {
+      "record_id": "recvhw4CCndVPq",
+      "table_id": "tblieT8ZK8HOQt0x",
+      "field": "标签",
+      "before": "#买家秀 #得物好物分享 #数码配件 #新年礼物",
+      "after": "#买家秀 #得物好物分享 #数码配件",
+      "removed_tokens": [
+        "#新年礼物"
+      ],
+      "内容编号": "T_260422_071_img05",
+      "标题": "地铁通勤的彩色心情，被这条链子承包了🚇"
+    },
+    {
+      "record_id": "recvhDQpwQ9iOp",
+      "table_id": "tblieT8ZK8HOQt0x",
+      "field": "标签",
+      "before": "#双11好物 #简约风 #得物开箱 #618好物 #数码礼物",
+      "after": "#双11好物 #简约风 #得物开箱 #618好物",
+      "removed_tokens": [
+        "#数码礼物"
+      ],
+      "内容编号": "T_260424_079_img01",
+      "标题": "书桌日常｜被这颗西瓜小马治愈的学习时光🍉"
+    },
+    {
+      "record_id": "recvhDQqo8RuIO",
+      "table_id": "tblieT8ZK8HOQt0x",
+      "field": "标签",
+      "before": "#双11好物 #简约风 #得物开箱 #618好物 #数码礼物",
+      "after": "#双11好物 #简约风 #得物开箱 #618好物",
+      "removed_tokens": [
+        "#数码礼物"
+      ],
+      "内容编号": "T_260424_079_img02",
+      "标题": "深夜书桌的彩虹小马🦄手感好治愈"
+    },
+    {
+      "record_id": "recvhDUjODvYyo",
+      "table_id": "tblieT8ZK8HOQt0x",
+      "field": "标签",
+      "before": "#得物开箱 #618好物 #潮流好物 #潮玩好物 #新年礼物",
+      "after": "#得物开箱 #618好物 #潮流好物 #潮玩好物",
+      "removed_tokens": [
+        "#新年礼物"
+      ],
+      "内容编号": "T_260424_080_img01",
+      "标题": "化妆台摆上它，手机瞬间变甜妹"
+    },
+    {
+      "record_id": "recvhDUkUv3Hxp",
+      "table_id": "tblieT8ZK8HOQt0x",
+      "field": "标签",
+      "before": "#得物开箱 #618好物 #潮流好物 #潮玩好物 #新年礼物",
+      "after": "#得物开箱 #618好物 #潮流好物 #潮玩好物",
+      "removed_tokens": [
+        "#新年礼物"
+      ],
+      "内容编号": "T_260424_080_img02",
+      "标题": "地铁刷卡再也不用翻包找手机了🛴"
+    },
+    {
+      "record_id": "recvhE4QWOomtB",
+      "table_id": "tblieT8ZK8HOQt0x",
+      "field": "标签",
+      "before": "#潮流数码 #学生党必备 #晒单 #数码礼物 #潮玩好物",
+      "after": "#潮流数码 #学生党必备 #晒单 #潮玩好物",
+      "removed_tokens": [
+        "#数码礼物"
+      ],
+      "内容编号": "T_260424_082_img01",
+      "标题": "通勤解放双手！这条彩色手机链真的救了我的命🥺"
+    },
+    {
+      "record_id": "recvhE4RSS3JI3",
+      "table_id": "tblieT8ZK8HOQt0x",
+      "field": "标签",
+      "before": "#潮流数码 #学生党必备 #晒单 #数码礼物 #潮玩好物",
+      "after": "#潮流数码 #学生党必备 #晒单 #潮玩好物",
+      "removed_tokens": [
+        "#数码礼物"
+      ],
+      "内容编号": "T_260424_082_img02",
+      "标题": "再也不怕地铁掏手机！这条小马串珠手机链赢麻了🥹"
+    }
+  ],
+  "snapshot": {
+    "tag": [
+      {
+        "record_id": "recvfOSrsjSGhM",
+        "table_id": "tblsnxUwqY1WgEAQ",
+        "field": "标签名称",
+        "before": "#新年礼物",
+        "suggested_action": "deprecate_or_replace_source_tag",
+        "after_if_soft_disable": "[DEPRECATED]#新年礼物"
+      },
+      {
+        "record_id": "recvfOSshrCzC8",
+        "table_id": "tblsnxUwqY1WgEAQ",
+        "field": "标签名称",
+        "before": "#数码礼物",
+        "suggested_action": "deprecate_or_replace_source_tag",
+        "after_if_soft_disable": "[DEPRECATED]#数码礼物"
+      }
+    ],
+    "content": [
+      {
+        "record_id": "recvh2ql9oqdze",
+        "table_id": "tblieT8ZK8HOQt0x",
+        "field": "标签",
+        "before": "#开箱推荐 #得物好物 #新年礼物 #潮玩好物 #得物数码",
+        "内容编号": "T_260417_057_img01",
+        "标题": "穿搭的温柔注脚，是手机链在摇晃✨"
+      },
+      {
+        "record_id": "recvh2sRJPRNvr",
+        "table_id": "tblieT8ZK8HOQt0x",
+        "field": "标签",
+        "before": "#晒单 #学生党必备 #数码配件 #数码礼物 #买家秀",
+        "内容编号": "T_260417_058_img01",
+        "标题": "穿搭的最后一笔：这条链让清冷感瞬间拉满✨"
+      },
+      {
+        "record_id": "recvh2sXjQJmbe",
+        "table_id": "tblieT8ZK8HOQt0x",
+        "field": "标签",
+        "before": "#开箱推荐 #得物好物 #新年礼物 #潮玩好物 #得物数码",
+        "内容编号": "T_260417_057_img02",
+        "标题": "穿搭的温柔注脚，是这条会晃动的彩色小马✨"
+      },
+      {
+        "record_id": "recvh2tZQrM42r",
+        "table_id": "tblieT8ZK8HOQt0x",
+        "field": "标签",
+        "before": "#开箱推荐 #得物好物 #新年礼物 #潮玩好物 #得物数码",
+        "内容编号": "T_260417_057_img03",
+        "标题": "穿搭的温柔句号，是这条会晃动的彩色童话✨"
+      },
+      {
+        "record_id": "recvh2u6NECtvj",
+        "table_id": "tblieT8ZK8HOQt0x",
+        "field": "标签",
+        "before": "#晒单 #学生党必备 #数码配件 #数码礼物 #买家秀",
+        "内容编号": "T_260417_058_img02",
+        "标题": "穿搭的温柔注脚，是这条会摇晃的星星✨"
+      },
+      {
+        "record_id": "recvh2uUIcQMSa",
+        "table_id": "tblieT8ZK8HOQt0x",
+        "field": "标签",
+        "before": "#晒单 #学生党必备 #数码配件 #数码礼物 #买家秀",
+        "内容编号": "T_260417_058_img03",
+        "标题": "穿搭的温柔注脚，是腕间垂落的星光✨"
+      },
+      {
+        "record_id": "recvhiZyiEXl0q",
+        "table_id": "tblieT8ZK8HOQt0x",
+        "field": "标签",
+        "before": "#简约风 #买家秀 #数码配件 #新年礼物 #潮玩好物",
+        "内容编号": "T_260418_060_img01",
+        "标题": "我的手机链，让书桌秒变ins治愈角落🌿"
+      },
+      {
+        "record_id": "recvhiZzAeqzxs",
+        "table_id": "tblieT8ZK8HOQt0x",
+        "field": "标签",
+        "before": "#简约风 #买家秀 #数码配件 #新年礼物 #潮玩好物",
+        "内容编号": "T_260418_060_img02",
+        "标题": "书店窗边那抹彩虹🌈，被问爆的手机链在这"
+      },
+      {
+        "record_id": "recvhjm5ha1Qjy",
+        "table_id": "tblieT8ZK8HOQt0x",
+        "field": "标签",
+        "before": "#买家秀 #学生党必备 #晒单 #新年礼物",
+        "内容编号": "T_260419_063_img01",
+        "标题": "豹纹手机链一挂，我的ccd被问了10次链接"
+      },
+      {
+        "record_id": "recvhjmf5YOY32",
+        "table_id": "tblieT8ZK8HOQt0x",
+        "field": "标签",
+        "before": "#买家秀 #学生党必备 #晒单 #新年礼物",
+        "内容编号": "T_260419_063_img02",
+        "标题": "挂上它，手机在草地上会发光✨"
+      },
+      {
+        "record_id": "recvhphz5w4s5m",
+        "table_id": "tblieT8ZK8HOQt0x",
+        "field": "标签",
+        "before": "#得物种草 #618好物 #得物推荐 #新年礼物 #买家秀",
+        "内容编号": "T_260421_067_img02",
+        "标题": "工位变秀场，我的手机链被同事追着要链接🍉"
+      },
+      {
+        "record_id": "recvhphB1s76Da",
+        "table_id": "tblieT8ZK8HOQt0x",
+        "field": "标签",
+        "before": "#得物种草 #618好物 #得物推荐 #新年礼物 #买家秀",
+        "内容编号": "T_260421_067_img03",
+        "标题": "通勤路上被问爆的彩色小马，社畜的快乐开关🐎"
+      },
+      {
+        "record_id": "recvhq7NDdCBmV",
+        "table_id": "tblieT8ZK8HOQt0x",
+        "field": "标签",
+        "before": "#得物数码 #买家秀 #手机配件 #潮流数码 #新年礼物",
+        "内容编号": "T_260421_069_img01",
+        "标题": "通勤党看过来！一根手机链让我地铁刷卡快人一步🚇"
+      },
+      {
+        "record_id": "recvhq7OYoGmvZ",
+        "table_id": "tblieT8ZK8HOQt0x",
+        "field": "标签",
+        "before": "#得物数码 #买家秀 #手机配件 #潮流数码 #新年礼物",
+        "内容编号": "T_260421_069_img02",
+        "标题": "地铁党必备！这根手机链让我拿咖啡刷卡两不误☕️"
+      },
+      {
+        "record_id": "recvhw4xcnNa0C",
+        "table_id": "tblieT8ZK8HOQt0x",
+        "field": "标签",
+        "before": "#买家秀 #得物好物分享 #数码配件 #新年礼物",
+        "内容编号": "T_260422_071_img01",
+        "标题": "取咖啡时被问3次的手机链☕️"
+      },
+      {
+        "record_id": "recvhw4yMlHzac",
+        "table_id": "tblieT8ZK8HOQt0x",
+        "field": "标签",
+        "before": "#买家秀 #得物好物分享 #数码配件 #新年礼物",
+        "内容编号": "T_260422_071_img02",
+        "标题": "出门前多花3秒，通勤心情好一倍🍩"
+      },
+      {
+        "record_id": "recvhw4AaR9dMl",
+        "table_id": "tblieT8ZK8HOQt0x",
+        "field": "标签",
+        "before": "#买家秀 #得物好物分享 #数码配件 #新年礼物",
+        "内容编号": "T_260422_071_img03",
+        "标题": "逛商场才发现，手机链真的不能乱买🛍️"
+      },
+      {
+        "record_id": "recvhw4BpBuLsj",
+        "table_id": "tblieT8ZK8HOQt0x",
+        "field": "标签",
+        "before": "#买家秀 #得物好物分享 #数码配件 #新年礼物",
+        "内容编号": "T_260422_071_img04",
+        "标题": "办公桌秒变ins风，靠这条手机链🍩"
+      },
+      {
+        "record_id": "recvhw4CCndVPq",
+        "table_id": "tblieT8ZK8HOQt0x",
+        "field": "标签",
+        "before": "#买家秀 #得物好物分享 #数码配件 #新年礼物",
+        "内容编号": "T_260422_071_img05",
+        "标题": "地铁通勤的彩色心情，被这条链子承包了🚇"
+      },
+      {
+        "record_id": "recvhDQpwQ9iOp",
+        "table_id": "tblieT8ZK8HOQt0x",
+        "field": "标签",
+        "before": "#双11好物 #简约风 #得物开箱 #618好物 #数码礼物",
+        "内容编号": "T_260424_079_img01",
+        "标题": "书桌日常｜被这颗西瓜小马治愈的学习时光🍉"
+      },
+      {
+        "record_id": "recvhDQqo8RuIO",
+        "table_id": "tblieT8ZK8HOQt0x",
+        "field": "标签",
+        "before": "#双11好物 #简约风 #得物开箱 #618好物 #数码礼物",
+        "内容编号": "T_260424_079_img02",
+        "标题": "深夜书桌的彩虹小马🦄手感好治愈"
+      },
+      {
+        "record_id": "recvhDUjODvYyo",
+        "table_id": "tblieT8ZK8HOQt0x",
+        "field": "标签",
+        "before": "#得物开箱 #618好物 #潮流好物 #潮玩好物 #新年礼物",
+        "内容编号": "T_260424_080_img01",
+        "标题": "化妆台摆上它，手机瞬间变甜妹"
+      },
+      {
+        "record_id": "recvhDUkUv3Hxp",
+        "table_id": "tblieT8ZK8HOQt0x",
+        "field": "标签",
+        "before": "#得物开箱 #618好物 #潮流好物 #潮玩好物 #新年礼物",
+        "内容编号": "T_260424_080_img02",
+        "标题": "地铁刷卡再也不用翻包找手机了🛴"
+      },
+      {
+        "record_id": "recvhE4QWOomtB",
+        "table_id": "tblieT8ZK8HOQt0x",
+        "field": "标签",
+        "before": "#潮流数码 #学生党必备 #晒单 #数码礼物 #潮玩好物",
+        "内容编号": "T_260424_082_img01",
+        "标题": "通勤解放双手！这条彩色手机链真的救了我的命🥺"
+      },
+      {
+        "record_id": "recvhE4RSS3JI3",
+        "table_id": "tblieT8ZK8HOQt0x",
+        "field": "标签",
+        "before": "#潮流数码 #学生党必备 #晒单 #数码礼物 #潮玩好物",
+        "内容编号": "T_260424_082_img02",
+        "标题": "再也不怕地铁掏手机！这条小马串珠手机链赢麻了🥹"
+      }
+    ]
+  }
+}

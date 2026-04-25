@@ -1,0 +1,98 @@
+{
+  "version": "2026-04-24",
+  "name": "feishu_interactive_05_risk",
+  "description": "正式版 05 风险 interactive card 模板。用于风险通报、影响同步与待决策项升级。",
+  "message_type": "risk",
+  "message_code": "05",
+  "label": "风险",
+  "msg_type": "interactive",
+  "card": {
+    "config": {
+      "wide_screen_mode": true,
+      "enable_forward": true
+    },
+    "header": {
+      "template": "red",
+      "title": {
+        "tag": "plain_text",
+        "content": "{title_prefix}｜05 风险"
+      },
+      "subtitle": {
+        "tag": "plain_text",
+        "content": "风险通报 · {task_name}"
+      }
+    },
+    "elements": [
+      {
+        "tag": "markdown",
+        "content": "**✦ 风险概览**\n事项名称｜{task_name}\n当前责任人｜{owner_mention}\n需拍板人｜{decision_maker_mentions}\n当前状态｜{status}\n风险目标｜{goal}"
+      },
+      {
+        "tag": "hr"
+      },
+      {
+        "tag": "markdown",
+        "content": "**◈ 风险影响**\n1. 风险点｜{risk_1}\n2. 影响范围｜{impact_1}\n3. 建议动作｜{action_suggestion}"
+      },
+      {
+        "tag": "hr"
+      },
+      {
+        "tag": "markdown",
+        "content": "**◔ 时点与状态**\n当前状态｜{status}\n处理时限｜{deadline}\n下一节点｜{next_milestone}"
+      },
+      {
+        "tag": "hr"
+      },
+      {
+        "tag": "markdown",
+        "content": "**☰ 需要动作**\n{actions_md}"
+      },
+      {
+        "tag": "hr"
+      },
+      {
+        "tag": "markdown",
+        "content": "**⊘ 边界提醒**\n{guardrails_md}"
+      },
+      {
+        "tag": "hr"
+      },
+      {
+        "tag": "markdown",
+        "content": "**receipt｜**以回读与 mention 验证为准。"
+      }
+    ]
+  },
+  "default_values": {
+    "decision_maker_mentions": "Hermes_CEO"
+  },
+  "business_sections": {
+    "actions": {
+      "render_key": "actions_md",
+      "legacy_prefix": "action_item_",
+      "required": true,
+      "max_items": 3
+    },
+    "guardrails": {
+      "render_key": "guardrails_md",
+      "legacy_prefix": "guardrail_",
+      "required": true,
+      "max_items": 3
+    }
+  },
+  "required_placeholders": [
+    "title_prefix",
+    "task_name",
+    "owner_mention",
+    "goal",
+    "risk_1",
+    "impact_1",
+    "action_suggestion",
+    "status",
+    "deadline",
+    "next_milestone",
+    "actions_md",
+    "guardrails_md"
+  ]
+}

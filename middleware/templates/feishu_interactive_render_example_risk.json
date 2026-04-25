@@ -1,0 +1,23 @@
+{
+  "title_prefix": "AI-CONTENT-HUB",
+  "task_name": "四表治理字段口径确认",
+  "owner_mention": "<at id=\"ou_1814da833564decc63d23f857fc5a47d\"></at>",
+  "decision_maker_mentions": "<at id=\"ou_3320aee078910b0973175037639620ba\"></at>",
+  "goal": "同步当前风险并请求明确决策口径",
+  "risk_1": "字段命名和归档口径尚未完全统一",
+  "impact_1": "会影响 Prompt 资产表与效果复盘表后续接线",
+  "action_suggestion": "先由 CEO 锁定口径，再进入技术实现",
+  "status": "待拍板",
+  "deadline": "今天 17:00 前",
+  "next_milestone": "完成字段口径锁定",
+  "actions": [
+    "主责先回短状态说明当前风险面",
+    "CEO 在时限前锁定字段口径",
+    "若口径仍冲突则升级为正式仲裁"
+  ],
+  "guardrails": [
+    "不要只报问题不写影响范围",
+    "不要绕开拍板人自行改口径",
+    "不要把风险通报写成长篇复盘"
+  ]
+}

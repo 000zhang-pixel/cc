@@ -1,0 +1,243 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-content-hub.local/schemas/feishu_interactive_formal_message_schema.json",
+  "title": "Feishu Interactive Formal Message Schema",
+  "description": "9 类正式群协同消息共用 schema。用于驱动 interactive card 渲染，而不是直接约束飞书原始 API payload。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "message",
+    "header",
+    "roles",
+    "body",
+    "receipt"
+  ],
+  "properties": {
+    "message": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "code",
+        "label",
+        "doc_type",
+        "title_prefix",
+        "task_name"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "accept",
+            "dispatch",
+            "ack",
+            "progress",
+            "risk",
+            "followup",
+            "delivery",
+            "conclusion",
+            "arbitration"
+          ]
+        },
+        "code": {
+          "type": "string",
+          "pattern": "^(01|02|03|04|05|06|07|08|09)$"
+        },
+        "label": {
+          "type": "string",
+          "enum": [
+            "受理",
+            "派单",
+            "接单",
+            "进展",
+            "风险",
+            "催办",
+            "交付",
+            "结论",
+            "仲裁"
+          ]
+        },
+        "doc_type": {
+          "type": "string"
+        },
+        "title_prefix": {
+          "type": "string",
+          "minLength": 1
+        },
+        "task_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        }
+      }
+    },
+    "header": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "subtitle",
+        "template"
+      ],
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "推荐格式：{title_prefix}｜{code} {label}"
+        },
+        "subtitle": {
+          "type": "string",
+          "description": "推荐格式：{doc_type} · {task_name_or_phase}"
+        },
+        "template": {
+          "type": "string",
+          "enum": [
+            "blue",
+            "turquoise",
+            "indigo",
+            "red",
+            "orange",
+            "green",
+            "purple"
+          ]
+        }
+      }
+    },
+    "roles": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "owner"
+      ],
+      "properties": {
+        "owner": {
+          "$ref": "#/$defs/mentionRole"
+        },
+        "collaborators": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/mentionRole"
+          }
+        },
+        "closers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/mentionRole"
+          }
+        },
+        "decision_maker": {
+          "$ref": "#/$defs/mentionRole"
+        },
+        "next_owner": {
+          "$ref": "#/$defs/mentionRole"
+        }
+      }
+    },
+    "body": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "overview",
+        "core",
+        "timing",
+        "action"
+      ],
+      "properties": {
+        "overview": {
+          "$ref": "#/$defs/section"
+        },
+        "core": {
+          "$ref": "#/$defs/section"
+        },
+        "timing": {
+          "$ref": "#/$defs/section"
+        },
+        "action": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/section"
+            }
+          ],
+          "description": "动作/回报区块。正式推荐由上游 `actions[]` 数组生成，不再推荐直接散列传入 report_item_* / action_item_*。"
+        },
+        "guardrails": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/section"
+            }
+          ],
+          "description": "边界/禁止项区块。正式推荐由上游 `guardrails[]` 数组生成；旧 guardrail_* 仅作兼容输入。"
+        }
+      }
+    },
+    "receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required",
+        "text"
+      ],
+      "properties": {
+        "required": {
+          "type": "boolean",
+          "const": true
+        },
+        "text": {
+          "type": "string",
+          "const": "receipt｜以回读与 mention 验证为准"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "mentionRole": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "display_name",
+        "mention_token"
+      ],
+      "properties": {
+        "display_name": {
+          "type": "string"
+        },
+        "mention_token": {
+          "type": "string",
+          "description": "渲染时可替换为 <at id=\"open_id\"></at> 或其他 mention 占位符"
+        }
+      }
+    },
+    "section": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "emoji",
+        "title",
+        "lines"
+      ],
+      "properties": {
+        "emoji": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "lines": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        },
+        "ordered": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    }
+  }
+}

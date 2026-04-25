@@ -1,0 +1,100 @@
+{
+  "version": "2026-04-24",
+  "name": "feishu_interactive_02_dispatch",
+  "description": "正式版 02 派单 interactive card 模板。用于多 agent 群协同中的执行单发送。",
+  "message_type": "dispatch",
+  "message_code": "02",
+  "label": "派单",
+  "msg_type": "interactive",
+  "card": {
+    "config": {
+      "wide_screen_mode": true,
+      "enable_forward": true
+    },
+    "header": {
+      "template": "blue",
+      "title": {
+        "tag": "plain_text",
+        "content": "{title_prefix}｜02 派单"
+      },
+      "subtitle": {
+        "tag": "plain_text",
+        "content": "执行单 · {task_name}"
+      }
+    },
+    "elements": [
+      {
+        "tag": "markdown",
+        "content": "**✦ 执行单概览**\n任务名称｜{task_name}\n主接单｜{owner_mention}\n协作知会｜{collaborator_mentions}\n收口抄送｜{closer_mentions}\n执行目标｜{goal}"
+      },
+      {
+        "tag": "hr"
+      },
+      {
+        "tag": "markdown",
+        "content": "**◈ 交付要求**\n1. {deliverable_1}\n2. {deliverable_2}\n3. {deliverable_3}"
+      },
+      {
+        "tag": "hr"
+      },
+      {
+        "tag": "markdown",
+        "content": "**◔ 时间节点**\n进展回报｜{progress_deadline}\n结果交付｜{delivery_deadline}\n当前状态｜{status}\n下一节点｜{next_milestone}"
+      },
+      {
+        "tag": "hr"
+      },
+      {
+        "tag": "markdown",
+        "content": "**☰ 回报格式**\n{actions_md}"
+      },
+      {
+        "tag": "hr"
+      },
+      {
+        "tag": "markdown",
+        "content": "**⊘ 禁止项**\n{guardrails_md}"
+      },
+      {
+        "tag": "hr"
+      },
+      {
+        "tag": "markdown",
+        "content": "**receipt｜**以回读与 mention 验证为准。"
+      }
+    ]
+  },
+  "default_values": {
+    "collaborator_mentions": "-",
+    "closer_mentions": "Hermes_CEO"
+  },
+  "business_sections": {
+    "actions": {
+      "render_key": "actions_md",
+      "legacy_prefix": "report_item_",
+      "required": true,
+      "max_items": 4
+    },
+    "guardrails": {
+      "render_key": "guardrails_md",
+      "legacy_prefix": "guardrail_",
+      "required": true,
+      "max_items": 3
+    }
+  },
+  "required_placeholders": [
+    "title_prefix",
+    "task_name",
+    "owner_mention",
+    "goal",
+    "deliverable_1",
+    "deliverable_2",
+    "deliverable_3",
+    "progress_deadline",
+    "delivery_deadline",
+    "status",
+    "next_milestone",
+    "actions_md",
+    "guardrails_md"
+  ]
+}

@@ -45,6 +45,21 @@
 - risk / arbitration：`actions[]` 表示需要动作 / 后续动作；`guardrails[]` 表示边界提醒
 - 旧字段 `report_item_* / action_item_* / guardrail_*` 仍短期兼容，但 wrapper 会给出 warning，不建议继续新增使用
 
+## 每日工作规划 / 工作总结快捷入口
+- 规范文档：`docs/plans/2026-04-25-multi-agent-daily-plan-and-summary-template-standard.md`
+- 一键命令：`docs/plans/2026-04-25-daily-plan-summary-quick-commands.md`
+- 默认口径：
+  - 每日工作规划 → `【进展】 rich`
+  - 每日工作总结 → `【结论】 standard`
+- 对应示例：
+  - CEO 工作规划：`middleware/templates/feishu_interactive_render_example_progress_daily_plan_ceo.json`
+  - 技术工作规划：`middleware/templates/feishu_interactive_render_example_progress_daily_plan_it_agent.json`
+  - 内容工作规划：`middleware/templates/feishu_interactive_render_example_progress_daily_plan_cc_agent.json`
+  - CEO 工作总结：`middleware/templates/feishu_interactive_render_example_conclusion_daily_summary_ceo.json`
+  - 技术工作总结：`middleware/templates/feishu_interactive_render_example_conclusion_daily_summary_it_agent.json`
+  - 内容工作总结：`middleware/templates/feishu_interactive_render_example_conclusion_daily_summary_cc_agent.json`
+- 注意：`progress rich` 工作规划命令不要传 `--closer`；`conclusion standard` 工作总结可传 `--closer Hermes_CEO`
+
 ## strict smoke
 - 全量：`python3 middleware/scripts/feishu_formal_message_strict_smoke.py`
 - 列 case：`python3 middleware/scripts/feishu_formal_message_strict_smoke.py --list`

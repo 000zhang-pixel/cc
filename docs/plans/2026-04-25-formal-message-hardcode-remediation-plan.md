@@ -10,8 +10,9 @@
 
 **Status Update (2026-04-25):**
 - Phase A 已完成：模板业务默认值清理、缺失阻断、示例补齐、自检与 strict smoke 已通过。
-- Phase B 进行中：`dispatch / risk / arbitration` 主路径已迁到 `business_sections + actions[] / guardrails[]`，renderer / wrapper 已支持数组输入，并对旧字段 `report_item_* / action_item_* / guardrail_*` 保留兼容告警。
-- 当前剩余：补 schema / cheatsheet / quick commands 等文档收口，并整理仅包含本次相关文件的干净 commit。
+- Phase B 已完成：`dispatch / risk / arbitration` 主路径已迁到 `business_sections + actions[] / guardrails[]`，renderer / wrapper 已支持数组输入，并对旧字段 `report_item_* / action_item_* / guardrail_*` 保留兼容告警。
+- Phase C 已完成首轮扩展：`01/03/04/06/07/08` 标准/short 主模板中原 `action_item_*` 区块已统一迁到 `actions[]`；对应示例数据与 strict smoke 已同步补齐。
+- 当前剩余：若要全量收敛，还需继续处理 probe / todo_probe / large_probe 等演示模板，以及更多文档/索引说明的同步收口。
 
 ---
 

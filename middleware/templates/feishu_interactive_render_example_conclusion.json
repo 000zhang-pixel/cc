@@ -1,0 +1,17 @@
+{
+  "title_prefix": "AI-CONTENT-HUB",
+  "task_name": "四表治理第一阶段",
+  "owner_mention": "<at id=\"ou_3320aee078910b0973175037639620ba\"></at>",
+  "closer_mentions": "<at id=\"ou_3320aee078910b0973175037639620ba\"></at>",
+  "goal": "完成第一阶段收口并明确下一阶段入口",
+  "judgement_1": "四张表的治理边界已形成统一口径",
+  "judgement_2": "Prompt 提升工作先以资产结构和版本规则为主",
+  "judgement_3": "下一阶段进入字段落表与执行联调",
+  "status": "阶段已收口",
+  "next_milestone": "进入第二阶段模板接线与试运行",
+  "actions": [
+    "按当前阶段结论进入下一阶段执行",
+    "如有阻塞，回【05 风险】",
+    "如需重新分工，由 Hermes_CEO 发【09 仲裁】"
+  ]
+}

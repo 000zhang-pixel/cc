@@ -1,0 +1,16 @@
+{
+  "title_prefix": "AI-CONTENT-HUB",
+  "task_name": "四表治理字段设计",
+  "goal": "同步当前阶段进展与下一节点",
+  "deliverable_1": "已完成商品主数据表字段初稿",
+  "deliverable_2": "已梳理 Prompt 资产表核心字段",
+  "deliverable_3": "已标出待确认字段冲突点",
+  "status": "进行中",
+  "deadline": "今天 18:00 前",
+  "next_milestone": "锁定冲突字段并进入复核",
+  "actions": [
+    "继续推进当前节点",
+    "如需协同，在下一轮同步中明确提出",
+    "如出现偏差，升级为【05 风险】"
+  ]
+}

@@ -1,0 +1,84 @@
+{
+  "version": "2026-04-24",
+  "name": "feishu_interactive_01_accept",
+  "description": "正式版 01 受理 interactive card 模板。用于任务已被正式受理并明确下一责任人。",
+  "message_type": "accept",
+  "message_code": "01",
+  "label": "受理",
+  "msg_type": "interactive",
+  "card": {
+    "config": {
+      "wide_screen_mode": true,
+      "enable_forward": true
+    },
+    "header": {
+      "template": "blue",
+      "title": {
+        "tag": "plain_text",
+        "content": "{title_prefix}｜01 受理"
+      },
+      "subtitle": {
+        "tag": "plain_text",
+        "content": "受理确认 · {task_name}"
+      }
+    },
+    "elements": [
+      {
+        "tag": "markdown",
+        "content": "**✦ 受理概览**\n事项名称｜{task_name}\n当前责任人｜{owner_mention}\n下一责任人｜{next_owner_mentions}\n当前状态｜{status}\n受理目标｜{goal}"
+      },
+      {
+        "tag": "hr"
+      },
+      {
+        "tag": "markdown",
+        "content": "**◈ 受理判断**\n1. {judgement_1}\n2. {judgement_2}\n3. {judgement_3}"
+      },
+      {
+        "tag": "hr"
+      },
+      {
+        "tag": "markdown",
+        "content": "**◔ 当前状态**\n当前状态｜{status}\n下一节点｜{next_milestone}\n需确认事项｜{decision_note}"
+      },
+      {
+        "tag": "hr"
+      },
+      {
+        "tag": "markdown",
+        "content": "**☰ 后续动作**\n{actions_md}"
+      },
+      {
+        "tag": "hr"
+      },
+      {
+        "tag": "markdown",
+        "content": "**receipt｜**以回读与 mention 验证为准。"
+      }
+    ]
+  },
+  "default_values": {
+    "next_owner_mentions": "-",
+    "decision_note": "无"
+  },
+  "business_sections": {
+    "actions": {
+      "render_key": "actions_md",
+      "legacy_prefix": "action_item_",
+      "max_items": 3,
+      "required": true
+    }
+  },
+  "required_placeholders": [
+    "title_prefix",
+    "task_name",
+    "owner_mention",
+    "goal",
+    "judgement_1",
+    "judgement_2",
+    "judgement_3",
+    "status",
+    "next_milestone",
+    "actions_md"
+  ]
+}

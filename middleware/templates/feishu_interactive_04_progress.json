@@ -1,0 +1,81 @@
+{
+  "version": "2026-04-24",
+  "name": "feishu_interactive_04_progress",
+  "description": "正式版 04 进展 interactive card 模板。用于阶段进展同步、状态更新与下一节点说明。",
+  "message_type": "progress",
+  "message_code": "04",
+  "label": "进展",
+  "msg_type": "interactive",
+  "card": {
+    "config": {
+      "wide_screen_mode": true,
+      "enable_forward": true
+    },
+    "header": {
+      "template": "indigo",
+      "title": {
+        "tag": "plain_text",
+        "content": "{title_prefix}｜04 进展"
+      },
+      "subtitle": {
+        "tag": "plain_text",
+        "content": "阶段进展 · {task_name}"
+      }
+    },
+    "elements": [
+      {
+        "tag": "markdown",
+        "content": "**✦ 进展概览**\n事项名称｜{task_name}\n当前责任人｜{owner_mention}\n当前状态｜{status}\n本次目标｜{goal}"
+      },
+      {
+        "tag": "hr"
+      },
+      {
+        "tag": "markdown",
+        "content": "**◈ 本次进展**\n1. {deliverable_1}\n2. {deliverable_2}\n3. {deliverable_3}"
+      },
+      {
+        "tag": "hr"
+      },
+      {
+        "tag": "markdown",
+        "content": "**◔ 时间与状态**\n当前状态｜{status}\n本阶段时限｜{deadline}\n下一节点｜{next_milestone}"
+      },
+      {
+        "tag": "hr"
+      },
+      {
+        "tag": "markdown",
+        "content": "**☰ 下一步动作**\n{actions_md}"
+      },
+      {
+        "tag": "hr"
+      },
+      {
+        "tag": "markdown",
+        "content": "**receipt｜**以回读与 mention 验证为准。"
+      }
+    ]
+  },
+  "business_sections": {
+    "actions": {
+      "render_key": "actions_md",
+      "legacy_prefix": "action_item_",
+      "max_items": 3,
+      "required": true
+    }
+  },
+  "required_placeholders": [
+    "title_prefix",
+    "task_name",
+    "owner_mention",
+    "goal",
+    "deliverable_1",
+    "deliverable_2",
+    "deliverable_3",
+    "status",
+    "deadline",
+    "next_milestone",
+    "actions_md"
+  ]
+}

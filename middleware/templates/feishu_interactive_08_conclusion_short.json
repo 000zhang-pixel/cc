@@ -1,0 +1,36 @@
+{
+  "version": "2026-04-24",
+  "name": "feishu_interactive_08_conclusion_short",
+  "description": "短模板版 08 结论。用于 phase 收口和快速阶段结论。",
+  "message_type": "conclusion",
+  "message_code": "08",
+  "label": "结论",
+  "detail_level": "short",
+  "msg_type": "interactive",
+  "card": {
+    "config": {"wide_screen_mode": true, "enable_forward": true},
+    "header": {
+      "template": "green",
+      "title": {"tag": "plain_text", "content": "{title_prefix}｜08 结论"},
+      "subtitle": {"tag": "plain_text", "content": "短模板 · {task_name}"}
+    },
+    "elements": [
+      {"tag": "markdown", "content": "**✦ 阶段结论**\n- {judgement_1}\n- {judgement_2}"},
+      {"tag": "hr"},
+      {"tag": "markdown", "content": "**◔ 当前状态**\n状态｜{status}\n下一责任人｜{owner_mention}"},
+      {"tag": "hr"},
+      {"tag": "markdown", "content": "**☰ 动作**\n{actions_md}"},
+      {"tag": "hr"},
+      {"tag": "markdown", "content": "**receipt｜**以回读与 mention 验证为准。"}
+    ]
+  },
+  "business_sections": {
+    "actions": {
+      "render_key": "actions_md",
+      "legacy_prefix": "action_item_",
+      "max_items": 2,
+      "required": true
+    }
+  },
+  "required_placeholders": ["title_prefix", "task_name", "judgement_1", "judgement_2", "status", "owner_mention", "actions_md"]
+}

@@ -1,0 +1,15 @@
+{
+  "title_prefix": "AI-CONTENT-HUB",
+  "task_name": "四表治理需求受理",
+  "goal": "确认已正式受理并进入下一责任人安排",
+  "judgement_1": "本次需求已进入正式治理流程",
+  "judgement_2": "当前阶段先锁定范围与责任口径",
+  "judgement_3": "下一步转入正式派单执行",
+  "status": "已受理",
+  "next_milestone": "转入 02 派单",
+  "actions": [
+    "按受理口径继续推进",
+    "如需正式拆解，转入【02 派单】",
+    "如责任需调整，由 Hermes_CEO 再次确认"
+  ]
+}

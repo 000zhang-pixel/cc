@@ -1,0 +1,84 @@
+{
+  "version": "2026-04-24",
+  "name": "feishu_interactive_06_followup",
+  "description": "正式版 06 催办 interactive card 模板。用于催办当前责任人并明确回报时限和下一责任人。",
+  "message_type": "followup",
+  "message_code": "06",
+  "label": "催办",
+  "msg_type": "interactive",
+  "card": {
+    "config": {
+      "wide_screen_mode": true,
+      "enable_forward": true
+    },
+    "header": {
+      "template": "orange",
+      "title": {
+        "tag": "plain_text",
+        "content": "{title_prefix}｜06 催办"
+      },
+      "subtitle": {
+        "tag": "plain_text",
+        "content": "催办单 · {task_name}"
+      }
+    },
+    "elements": [
+      {
+        "tag": "markdown",
+        "content": "**✦ 催办概览**\n事项名称｜{task_name}\n当前责任人｜{owner_mention}\n下一责任人｜{next_owner_mentions}\n当前状态｜{status}\n催办目标｜{goal}"
+      },
+      {
+        "tag": "hr"
+      },
+      {
+        "tag": "markdown",
+        "content": "**◈ 催办清单**\n- ☐ {deliverable_1}\n- ☐ {deliverable_2}\n- ☐ {deliverable_3}"
+      },
+      {
+        "tag": "hr"
+      },
+      {
+        "tag": "markdown",
+        "content": "**◔ 时间与要求**\n当前状态｜{status}\n回报时点｜{progress_deadline}\n最晚时限｜{deadline}"
+      },
+      {
+        "tag": "hr"
+      },
+      {
+        "tag": "markdown",
+        "content": "**☰ 后续动作**\n{actions_md}"
+      },
+      {
+        "tag": "hr"
+      },
+      {
+        "tag": "markdown",
+        "content": "**receipt｜**以回读与 mention 验证为准。"
+      }
+    ]
+  },
+  "default_values": {
+    "next_owner_mentions": "-"
+  },
+  "business_sections": {
+    "actions": {
+      "render_key": "actions_md",
+      "legacy_prefix": "action_item_",
+      "max_items": 3,
+      "required": true
+    }
+  },
+  "required_placeholders": [
+    "title_prefix",
+    "task_name",
+    "owner_mention",
+    "goal",
+    "deliverable_1",
+    "deliverable_2",
+    "deliverable_3",
+    "status",
+    "progress_deadline",
+    "deadline",
+    "actions_md"
+  ]
+}

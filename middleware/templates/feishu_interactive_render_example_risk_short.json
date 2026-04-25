@@ -1,0 +1,12 @@
+{
+  "title_prefix": "AI-CONTENT-HUB",
+  "task_name": "四表治理字段口径确认",
+  "owner_mention": "@大T_技术总工",
+  "risk_1": "字段命名和归档口径尚未完全统一",
+  "impact_1": "会影响 Prompt 资产表与效果复盘表后续接线",
+  "deadline": "今天 17:00 前",
+  "actions": [
+    "请相关责任人先回短状态",
+    "如需拍板，升级完整【05 风险】或【09 仲裁】"
+  ]
+}

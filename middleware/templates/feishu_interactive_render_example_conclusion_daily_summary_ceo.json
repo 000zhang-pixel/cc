@@ -1,0 +1,17 @@
+{
+  "title_prefix": "Hermes",
+  "task_name": "Hermes_CEO 今日工作总结",
+  "owner_mention": "<at id=\"ou_3320aee078910b0973175037639620ba\"></at>",
+  "closer_mentions": "<at id=\"ou_3320aee078910b0973175037639620ba\"></at>",
+  "goal": "对今天的协同推进、阶段收口与群治理情况做日终总结，并明确明日衔接。",
+  "judgement_1": "今天的重点协同任务已按优先级推进，关键线程得到阶段收口",
+  "judgement_2": "需要正式动作的事项已尽量通过 wrapper + verified mention + receipt 执行",
+  "judgement_3": "明天继续围绕高优先级主线做派单、催办与结论统一发布",
+  "status": "今日阶段已总结",
+  "next_milestone": "明天开工前确认新的优先级与待收口线程",
+  "actions": [
+    "按今日结论进入明日协同推进",
+    "若有线程重新膨胀，优先发正式【结论】或【仲裁】收口",
+    "若出现新阻塞，及时升级到正式【风险】"
+  ]
+}

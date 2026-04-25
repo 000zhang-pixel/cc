@@ -1,0 +1,15 @@
+{
+  "title_prefix": "Hermes",
+  "task_name": "大C_内容总监 今日内容主线与工作计划",
+  "goal": "同步今天的内容主线、产出方向、协同输入与风险边界，提升群内扫读效率。",
+  "todo_done_1_struck": "~~已完成当前内容主线梳理，并明确今日重点输出方向~~",
+  "todo_done_2_struck": "~~已确认今天优先要补的结构判断、文案方向与协同输入~~",
+  "todo_pending_1": "继续推进今日最优先的内容框架、文案结构或发布建议输出",
+  "todo_pending_2": "继续把新增判断沉淀到文档、计划或结果单，避免只停留在群聊讨论",
+  "status": "进行中 / 今日内容优先级已排定",
+  "deadline": "今天 18:00 前形成阶段性内容收口或风险回报",
+  "next_milestone": "先完成关键内容方向锁定，再推进具体产出与协同回传",
+  "annex_title": "大C_内容总监 今日工作计划",
+  "annex_summary": "附录建议按统一模板写明：主线状态、P0/P1 计划、输出物、协同点与风险边界。",
+  "annex_link": "docs/plans/2026-04-25-multi-agent-daily-plan-and-summary-template-standard.md"
+}

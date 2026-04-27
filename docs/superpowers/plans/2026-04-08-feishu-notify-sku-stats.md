@@ -130,7 +130,7 @@ pub_record → 关联内容 → 关联SKU
 | `middleware/handlers/publish.py` | 新增方法+调用 | `_notify_card_success()`, `_notify_card_failure()`, `_update_sku_stats()`, `_get_sku_stats_summary()` |
 | `middleware/handlers/publish_record_creator.py` | 新增方法+调用 | `_notify_card_queued()`，创建记录后调用 |
 | `middleware/main.py` | 参数透传 | `notifications_cfg` 传给2个handler |
-| `middleware/test_notify.py` | 新增 | 三种状态卡片手动测试脚本 |
+| `middleware/test_notify.py` | 已移除 | 早期手动测试脚本，2026-04-28 清理过期测试入口 |
 | **飞书 Base** | 新建表+字段+数据 | SKU发布统计表，2条初始行 |
 
 ---

@@ -146,13 +146,18 @@ def soft_score(prec: dict, content_type: str, scene_dict: dict) -> float:
 
 # ── 模拟 _assign_personas ──────────────────────────────────────────────────
 
+def _is_no_person_scene(scene: dict) -> bool:
+    person_type = str(scene.get("人物类型") or "").strip()
+    return ("无人物" in person_type) or ("纯产品" in person_type)
+
+
 def assign_personas(groups, pool, scene_assignments, persona_mode="自动"):
     assignments = {}
     if not pool:
         # Path B: no persona table — fallback to scene person fields
         for g in groups:
             scene = scene_assignments.get(g["group_id"], {})
-            if scene.get("人物类型"):
+            if scene.get("人物类型") and not _is_no_person_scene(scene):
                 assignments[g["group_id"]] = {
                     "persona_id": None,
                     "persona_label": scene["人物类型"],
@@ -169,18 +174,22 @@ def assign_personas(groups, pool, scene_assignments, persona_mode="自动"):
 
     # Soft-match scoring
     if persona_mode == "固定主人设":
+        persona_groups = [g for g in groups if not _is_no_person_scene(scene_assignments.get(g["group_id"], {}))]
         best = max(pool, key=lambda r: sum(
             soft_score(r, g.get("content_type", ""), scene_assignments.get(g["group_id"], {}))
-            for g in groups
-        ))
+            for g in persona_groups
+        )) if persona_groups else None
         for g in groups:
-            assignments[g["group_id"]] = extract_persona_fields(best)
+            assignments[g["group_id"]] = None if _is_no_person_scene(scene_assignments.get(g["group_id"], {})) else extract_persona_fields(best)
     else:
         _used_ids = []
         for g in groups:
             gid = g["group_id"]
             ct = g.get("content_type", "")
             sd = scene_assignments.get(gid, {})
+            if _is_no_person_scene(sd):
+                assignments[gid] = None
+                continue
             candidates = [r for r in pool if id(r) not in _used_ids] or pool
             chosen = max(candidates, key=lambda r: soft_score(r, ct, sd))
             assignments[gid] = extract_persona_fields(chosen)
@@ -191,6 +200,10 @@ def assign_personas(groups, pool, scene_assignments, persona_mode="自动"):
 # ── 测试 ────────────────────────────────────────────────────────────────────
 
 scene_assignments = {g["group_id"]: MOCK_SCENE_FALLBACK for g in MOCK_GROUPS}
+no_person_scene_assignments = {
+    **scene_assignments,
+    "g01": {**MOCK_SCENE_FALLBACK, "人物类型": "无人物·纯产品"},
+}
 
 print("=" * 60)
 print("  Persona present / absent 路径验证")
@@ -239,6 +252,13 @@ print(f"  PS001 vs 场景展示: {score_ps001_scene:.2f}")
 assert score_ps001_grass > score_ps001_scene, \
     f"FAIL: PS001对种草推荐的分应 > 场景展示，实际 {score_ps001_grass} vs {score_ps001_scene}"
 print(f"  ✓ 内容类型命中时评分更高（软匹配生效）")
+
+# ── Path E: 纯产品场景不分配 persona ─────────────────────────────────────
+print("\n[Path E] 无人物·纯产品 场景不分配 persona")
+e = assign_personas(MOCK_GROUPS, MOCK_PERSONA_POOL, no_person_scene_assignments, "自动")
+assert e["g01"] is None, f"FAIL: g01 应为 None，实际={e['g01']}"
+assert e["g02"] is not None and e["g03"] is not None, "FAIL: 其他人物场景仍应正常分配"
+print("  ✓ g01=无人物·纯产品 时不分配 persona，其余组保持正常")
 
 print()
 print("=" * 60)

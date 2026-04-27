@@ -471,6 +471,10 @@ class FeishuClient:
             "规划编号",
             "素材编号",
             "SKU编号",
+            "策略编号",
+            "方案编号",
+            "场景编号",
+            "人设编号",
         ]
         for field_name in unique_lookup_fields:
             value = fields.get(field_name)

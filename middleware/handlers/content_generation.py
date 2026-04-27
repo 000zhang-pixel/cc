@@ -16,6 +16,7 @@ Full pipeline:
   12. Update 表2 execution status
 """
 from __future__ import annotations
+import hashlib
 import json
 import logging
 import random
@@ -43,8 +44,11 @@ _MODEL_NAME_MAP = {
     "Kimi K2.5":        "kimi-k2.5",
     "DeepSeek":         "deepseek",
     "Nanobanana 2":     "nanobanana-2",
-    "xiaole / gemini-3.1-flash-image-preview": "gemini-3.1-flash-image-preview",
-    "xiaole / gemini-3-pro-image-preview": "gemini-3-pro-image-preview",
+    # Legacy Xiaole display names are remapped to the approved Nanobanana relay.
+    # Direct Xiaole proxy providers remain blocked in build_image_adapter() so
+    # deprecated plan options fail fast instead of hanging on repeated 503s.
+    "xiaole / gemini-3.1-flash-image-preview": "nanobanana-2",
+    "xiaole / gemini-3-pro-image-preview": "nanobanana-2",
     "volcengine-seedream": "volcengine-seedream",
     "volcengine-seedance": "volcengine-seedance",
     "Veo 3":            "veo-3",
@@ -78,6 +82,30 @@ CONTENT_TYPES = [
     "开箱", "买家秀/晒单", "节日/活动限定", "新品发布",
     "选购攻略/使用教程",
 ]
+
+# Runtime guardrails — belt-and-suspenders protection on top of table governance.
+# These are intentionally conservative and focus on patterns already confirmed by
+# PRD / audit / live regression evidence.
+_BLOCKED_SCENE_CODES = {
+    "SC072", "SC073", "SC074", "SC075", "SC076", "SC077", "SC078",
+    "SC081", "SC082", "SC083", "SC084", "SC085", "SC086", "SC087",
+    "SC088", "SC089", "SC090", "SC091", "SC110", "SC111",
+}
+_BLOCKED_SCENE_KEYWORDS = (
+    "健身房", "更衣室", "瑜伽", "迷你裙", "跑步", "车内", "副驾", "后座",
+    "驾驶座", "车载支架", "飞扬", "双人", "闺蜜",
+)
+
+_BLOCKED_PERSONA_CODES = {"PS005", "PS012", "PS020"}
+_BLOCKED_PERSONA_KEYWORDS = (
+    "松弛户外", "氛围感摄影", "闺蜜同款", "烟熏", "皮草", "薄纱", "工装",
+    "snapback", "双马尾", "双人", "欧美妆",
+)
+
+_BLOCKED_SHOTPLAN_CODES = {"SP020", "SP021", "SP022", "SP023", "SP024", "SP025", "SP033", "SP047"}
+_BLOCKED_SHOTPLAN_KEYWORDS = (
+    "健身房", "瑜伽", "迷你裙", "跑步", "车内", "运动", "闺蜜", "双人",
+)
 
 
 class ContentGenerationHandler:
@@ -190,7 +218,7 @@ class ContentGenerationHandler:
         prompt_records = self._create_prompt_records(record_id, groups, plan_fields, sku_fields, cfg)
 
         # --- 8. Generate Prompts via Prompt engine ---
-        self._fill_prompts(prompt_records, sku_fields, cfg, tags, text_adapter, scene_assignments, briefs, persona_assignments)
+        self._fill_prompts(plan_code, prompt_records, sku_fields, cfg, tags, text_adapter, scene_assignments, briefs, persona_assignments)
 
         # P0-2: Re-persist briefs now that _fill_prompts has resolved strategy_id + shotplan_id
         if self._storage:
@@ -486,6 +514,200 @@ class ContentGenerationHandler:
     # Prompt engine — table-driven lookup helpers
     # ------------------------------------------------------------------
 
+    def _record_code(self, record: dict, field_name: str) -> str:
+        try:
+            return self._feishu.get_text(record, field_name).strip()
+        except Exception:
+            return ""
+
+    @staticmethod
+    def _is_no_person_scene(person_type: str) -> bool:
+        text = (person_type or "").strip()
+        return (not text) or ("无人物" in text) or ("纯产品" in text)
+
+    @staticmethod
+    def _fingerprint_payload(payload: dict) -> str:
+        serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+    def _build_prompt_fingerprint_payload(
+        self,
+        gid: str,
+        scene: dict,
+        persona: dict | None,
+        brief: dict | None,
+        master_prompt: str,
+        sub_prompts: list[str],
+        image_model_name: str,
+        shotplan: dict | None = None,
+    ) -> dict:
+        return {
+            "group_id": gid,
+            "scene_id": scene.get("scene_id", ""),
+            "persona_id": (persona or {}).get("persona_id", ""),
+            "shotplan_id": self._feishu.get_text(shotplan, "方案编号") if shotplan else "",
+            "brief": {
+                "title_pattern": (brief or {}).get("title_pattern", ""),
+                "narrative_angle": (brief or {}).get("narrative_angle", ""),
+                "structure_mode": (brief or {}).get("structure_mode", ""),
+                "consistency_anchor": ((brief or {}).get("consistency_anchor") or {}).get("person", ""),
+                "consistency_strength": (brief or {}).get("consistency_strength", ""),
+            },
+            "master_prompt": master_prompt,
+            "sub_prompts": sub_prompts,
+            "image_model_name": image_model_name,
+        }
+
+    def _existing_content_fingerprint(self, plan_code: str, gid: str) -> str:
+        if not self._storage:
+            return ""
+        try:
+            meta = self._storage.read_content_meta(plan_code, gid) or {}
+        except Exception:
+            logger.warning("Failed to read content.json for fingerprint lookup: %s/%s", plan_code, gid, exc_info=True)
+            return ""
+        debug = meta.get("debug") or {}
+        return str(debug.get("prompt_fingerprint") or "").strip()
+
+    def _assert_no_prompt_content_drift(
+        self,
+        plan_code: str,
+        gid: str,
+        current_fingerprint: str,
+        payload: dict,
+    ) -> None:
+        existing_fingerprint = self._existing_content_fingerprint(plan_code, gid)
+        if not existing_fingerprint:
+            return
+        if existing_fingerprint == current_fingerprint:
+            return
+        raise ValueError(
+            "检测到已生成内容与当前Prompt签名不一致，已阻断本次重跑以避免‘新Prompt+旧图’错位："
+            f"group={gid}, scene={payload.get('scene_id')}, persona={payload.get('persona_id')}, shotplan={payload.get('shotplan_id')}"
+        )
+
+    def _can_reuse_local_image_cache(self, plan_code: str, gid: str, current_fingerprint: str) -> bool:
+        existing_fingerprint = self._existing_content_fingerprint(plan_code, gid)
+        return bool(current_fingerprint) and current_fingerprint == existing_fingerprint
+
+    def _build_persona_lock(
+        self,
+        scene: dict,
+        persona: dict | None = None,
+        brief: dict | None = None,
+    ) -> dict:
+        person_type = scene.get("人物类型", "").strip()
+        if self._is_no_person_scene(person_type):
+            return {}
+
+        gender = ((persona or {}).get("gender", "") or scene.get("性别倾向", "")).strip()
+        age = ((persona or {}).get("age", "") or scene.get("年龄段", "")).strip()
+        appearance = ((persona or {}).get("appearance", "") or scene.get("外貌风格", "")).strip()
+        style = ((persona or {}).get("style", "") or "").strip()
+        action = ((persona or {}).get("action", "") or scene.get("姿态倾向", "")).strip()
+        prompt_template = ((persona or {}).get("prompt_template", "") or "").strip()
+        anchor = (((brief or {}).get("consistency_anchor") or {}).get("person", "") or ((persona or {}).get("consistency_template", "") or "")).strip()
+
+        return {
+            "person_type": person_type,
+            "gender": gender,
+            "age": age,
+            "appearance": appearance,
+            "style": style,
+            "action": action,
+            "prompt_template": prompt_template,
+            "anchor": anchor,
+        }
+
+    @staticmethod
+    def _render_master_identity_lock(lock: dict) -> list[str]:
+        if not lock:
+            return []
+        lines = ["", "【人物锁定卡】"]
+        identity_bits = [x for x in [lock.get("person_type", ""), lock.get("gender", ""), lock.get("age", "")] if x]
+        if identity_bits:
+            lines.append(f"- 身份锁定：{'，'.join(identity_bits)}，同一人物身份、同一张脸")
+        if lock.get("appearance"):
+            lines.append(f"- 外貌锁定：{lock['appearance']}")
+        if lock.get("style"):
+            lines.append(f"- 穿搭锁定：{lock['style']}，所有图片必须保持同套服装、同颜色/款式/细节")
+        if lock.get("action"):
+            lines.append(f"- 动作倾向：{lock['action']}")
+        lines.append("- 一致性锁定：same face identity, same hairstyle, same makeup, same outfit across all images")
+        lines.append("- 禁止漂移：no identity drift, no hairstyle drift, no makeup drift, no outfit drift")
+        if lock.get("prompt_template"):
+            lines.append(f"- 人物补充描述：{lock['prompt_template']}")
+        return lines
+
+    @staticmethod
+    def _render_sub_identity_lock(lock: dict) -> str:
+        if not lock:
+            return ""
+        bits = []
+        if lock.get("age"):
+            bits.append(f"年龄={lock['age']}")
+        if lock.get("appearance"):
+            bits.append(f"外貌={lock['appearance']}")
+        if lock.get("style"):
+            bits.append(f"穿搭={lock['style']}")
+        summary = "；".join(bits)
+        suffix = f"；{summary}" if summary else ""
+        return (
+            "，【人物锁定】same girl, same face, same hairstyle, same makeup, same outfit across all images"
+            f"【禁止漂移】no identity drift, no hairstyle drift, no makeup drift, no outfit drift{suffix}"
+        )
+
+    def _record_contains_risk_keyword(self, record: dict, field_names: list[str], keywords: tuple[str, ...]) -> bool:
+        f = self._feishu
+        text_parts: list[str] = []
+        for field_name in field_names:
+            try:
+                text_parts.append(f.get_text(record, field_name))
+            except Exception:
+                pass
+            try:
+                text_parts.extend(f.get_options(record, field_name) or [])
+            except Exception:
+                pass
+            try:
+                option_value = f.get_option(record, field_name)
+                if option_value:
+                    text_parts.append(option_value)
+            except Exception:
+                pass
+        haystack = " ".join(x for x in text_parts if x)
+        return any(keyword in haystack for keyword in keywords)
+
+    def _is_blocked_scene(self, record: dict) -> bool:
+        code = self._record_code(record, "场景编号")
+        if code in _BLOCKED_SCENE_CODES:
+            return True
+        return self._record_contains_risk_keyword(
+            record,
+            ["场景名称", "场景描述_中文", "场景主题", "备注", "差异化备注"],
+            _BLOCKED_SCENE_KEYWORDS,
+        )
+
+    def _is_blocked_persona(self, record: dict) -> bool:
+        code = self._record_code(record, "人设编号")
+        if code in _BLOCKED_PERSONA_CODES:
+            return True
+        return self._record_contains_risk_keyword(
+            record,
+            ["人设名称", "外貌风格", "穿搭风格", "Prompt描述模板", "备注", "气质标签"],
+            _BLOCKED_PERSONA_KEYWORDS,
+        )
+
+    def _is_blocked_shotplan(self, record: dict) -> bool:
+        code = self._record_code(record, "方案编号")
+        if code in _BLOCKED_SHOTPLAN_CODES:
+            return True
+        return self._record_contains_risk_keyword(
+            record,
+            ["方案名称", "备注", "动作变化要求", "禁止重复镜头"],
+            _BLOCKED_SHOTPLAN_KEYWORDS,
+        )
+
     def _select_best(
         self,
         records: list,
@@ -578,15 +800,17 @@ class ContentGenerationHandler:
         except Exception:
             logger.warning("_lookup_shotplan: failed to list records", exc_info=True)
             return None
+        safe_records = [r for r in records if not self._is_blocked_shotplan(r)]
+        blocked_count = len(records) - len(safe_records)
         form_aliases = set(_shotplan_form_aliases(content_form))
         form_matched = [
-            r for r in records
+            r for r in safe_records
             if form_aliases.intersection(self._feishu.get_options(r, "适用内容形态") or [])
         ]
-        candidates = form_matched if form_matched else records
+        candidates = form_matched if form_matched else safe_records
         logger.info(
-            "_lookup_shotplan: content_form=%r aliases=%s matched=%d enabled=%d",
-            content_form, sorted(form_aliases), len(form_matched), len(records),
+            "_lookup_shotplan: content_form=%r aliases=%s matched=%d enabled=%d blocked=%d",
+            content_form, sorted(form_aliases), len(form_matched), len(records), blocked_count,
         )
         return self._select_best(
             candidates, content_type, platform=None, category=category,
@@ -611,11 +835,19 @@ class ContentGenerationHandler:
             return []
         f = self._feishu
         matched = []
+        blocked_count = 0
         for r in records:
+            if self._is_blocked_scene(r):
+                blocked_count += 1
+                continue
             cats = f.get_options(r, "适用品类") or []
             if not cats or category in cats:   # empty = 通用
                 weight = int(f.get_number(r, "权重", 0))
                 matched.append((weight, r))
+        logger.info(
+            "_fetch_scenes: category=%r enabled=%d blocked=%d matched=%d",
+            category, len(records), blocked_count, len(matched),
+        )
         return matched
 
     def _assign_scenes(
@@ -729,14 +961,21 @@ class ContentGenerationHandler:
             try:
                 records = f.list_records(table_id, filter_str='CurrentValue.[是否启用]="启用"')
                 # Filter by category (empty 适用品类 = 通用)
+                blocked_count = 0
                 for r in records:
+                    if self._is_blocked_persona(r):
+                        blocked_count += 1
+                        continue
                     cats = f.get_options(r, "适用品类") or []
                     if not cats or category in cats:
                         prio = int(f.get_number(r, "优先级", 0))
                         persona_pool.append((prio, r))
                 persona_pool.sort(key=lambda x: x[0], reverse=True)
                 persona_pool = [r for _, r in persona_pool]
-                logger.info("_assign_personas: table configured, pool_size=%d", len(persona_pool))
+                logger.info(
+                    "_assign_personas: table configured, enabled=%d blocked=%d pool_size=%d",
+                    len(records), blocked_count, len(persona_pool),
+                )
             except Exception:
                 logger.warning("_assign_personas: failed to read Persona table", exc_info=True)
                 persona_pool = []
@@ -790,24 +1029,37 @@ class ContentGenerationHandler:
                 return _soft_score(prec, content_type, scene_dict) - int(f.get_number(prec, "优先级", 0)) / 200.0
 
             if persona_mode == "固定主人设":
-                # Pick persona with best aggregate fit across all groups
-                best = max(persona_pool, key=lambda r: sum(
-                    _soft_score(r, g.get("content_type", ""), scene_assignments.get(g["group_id"], {}))
-                    for g in groups
-                ))
-                # Warn if best persona has no tag signal across any group
-                _best_signal = max(
-                    _tag_signal(best, g.get("content_type", ""), scene_assignments.get(g["group_id"], {}))
-                    for g in groups
-                )
-                if _best_signal < 0.001:
-                    logger.warning(
-                        "_assign_personas [固定主人设]: zero tag signal — selected %s by priority only; "
-                        "consider adding 适合人设标签/人设适配标签 config",
-                        f.get_text(best, "人设编号"),
+                persona_groups = [
+                    g for g in groups
+                    if (
+                        "人物类型" not in (scene_assignments.get(g["group_id"], {}) or {})
+                        or not self._is_no_person_scene((scene_assignments.get(g["group_id"], {}) or {}).get("人物类型", ""))
                     )
+                ]
+                if persona_groups:
+                    # Pick persona with best aggregate fit across all person-bearing groups
+                    best = max(persona_pool, key=lambda r: sum(
+                        _soft_score(r, g.get("content_type", ""), scene_assignments.get(g["group_id"], {}))
+                        for g in persona_groups
+                    ))
+                    _best_signal = max(
+                        _tag_signal(best, g.get("content_type", ""), scene_assignments.get(g["group_id"], {}))
+                        for g in persona_groups
+                    )
+                    if _best_signal < 0.001:
+                        logger.warning(
+                            "_assign_personas [固定主人设]: zero tag signal — selected %s by priority only; "
+                            "consider adding 适合人设标签/人设适配标签 config",
+                            f.get_text(best, "人设编号"),
+                        )
+                else:
+                    best = None
                 for g in groups:
-                    assignments[g["group_id"]] = self._extract_persona_fields(best)
+                    scene_dict = scene_assignments.get(g["group_id"], {}) or {}
+                    if "人物类型" in scene_dict and self._is_no_person_scene(scene_dict.get("人物类型", "")):
+                        assignments[g["group_id"]] = None
+                    else:
+                        assignments[g["group_id"]] = self._extract_persona_fields(best) if best else None
             else:
                 # 自动 / 多人设轮换: best-fit per group, prefer variety (avoid reuse)
                 _used_rec_ids: set = set()
@@ -815,6 +1067,9 @@ class ContentGenerationHandler:
                     gid = g["group_id"]
                     content_type = g.get("content_type", "")
                     scene_dict   = scene_assignments.get(gid, {})
+                    if "人物类型" in scene_dict and self._is_no_person_scene(scene_dict.get("人物类型", "")):
+                        assignments[gid] = None
+                        continue
                     # Prefer personas not yet assigned in this batch; fallback to full pool
                     candidates = [r for r in persona_pool if r.get("record_id") not in _used_rec_ids] or persona_pool
                     chosen = max(candidates, key=lambda r: _soft_score(r, content_type, scene_dict))
@@ -832,7 +1087,7 @@ class ContentGenerationHandler:
             for g in groups:
                 scene = scene_assignments.get(g["group_id"], {})
                 person_type = scene.get("人物类型", "").strip()
-                if person_type and person_type not in ("无人物", "纯产品", ""):
+                if person_type and not self._is_no_person_scene(person_type):
                     assignments[g["group_id"]] = {
                         "persona_id": None,
                         "persona_label": person_type,
@@ -957,8 +1212,12 @@ class ContentGenerationHandler:
             persona_id    = (persona or {}).get("persona_id") or ""
             persona_label = (persona or {}).get("persona_label") or ""
 
-            # Build consistency_anchor from Persona (preferred) or Scene fallback
-            if persona:
+            # Build consistency_anchor from Persona (preferred) or Scene fallback.
+            # Pure-product / no-person scenes must not inherit any person identity lock.
+            person_type = scene.get("人物类型", "")
+            if self._is_no_person_scene(person_type):
+                consistency_anchor = ""
+            elif persona:
                 tmpl = persona.get("consistency_template", "")
                 if tmpl:
                     consistency_anchor = tmpl
@@ -968,11 +1227,12 @@ class ContentGenerationHandler:
                         persona.get("gender", ""),
                         persona.get("age", ""),
                         persona.get("appearance", ""),
+                        persona.get("style", ""),
                     ]
                     desc = "、".join(x for x in parts if x)
                     consistency_anchor = f"同一人物（{desc}），同套服装，同款发型，同一面部特征" if desc else ""
             else:
-                # No persona — build from scene
+                # No persona — build from scene only when the scene actually contains a person.
                 gender = scene.get("性别倾向", "")
                 age    = scene.get("年龄段", "")
                 appear = scene.get("外貌风格", "")
@@ -1011,6 +1271,40 @@ class ContentGenerationHandler:
     # ------------------------------------------------------------------
     # Prompt builders (table-driven)
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _parse_title_pattern_pool(raw: str) -> list[str]:
+        """Parse Strategy 标题句式池 into an ordered non-empty string list.
+
+        Preferred format is a JSON array, but live table data has historically
+        contained newline / delimiter-separated text. We parse those formats as a
+        best-effort compatibility fallback so title rotation does not silently
+        collapse to hardcoded defaults during the table migration window.
+        """
+        raw = (raw or "").strip()
+        if not raw:
+            return []
+
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            parsed = None
+
+        if isinstance(parsed, list):
+            return [str(item).strip() for item in parsed if str(item).strip()]
+
+        import re as _re
+
+        parts = _re.split(r"\r?\n|[；;]+|[|｜]+|/", raw)
+        cleaned = []
+        seen = set()
+        for part in parts:
+            text = part.strip(" \t-•0123456789.、")
+            if not text or text in seen:
+                continue
+            cleaned.append(text)
+            seen.add(text)
+        return cleaned
 
     def _build_text_prompts_from_strategy(
         self,
@@ -1098,14 +1392,7 @@ class ContentGenerationHandler:
         except Exception:
             pass
 
-        title_pool: list[str] = []
-        if title_pool_raw:
-            try:
-                parsed = json.loads(title_pool_raw)
-                if isinstance(parsed, list):
-                    title_pool = [str(x) for x in parsed if x]
-            except (json.JSONDecodeError, Exception):
-                pass
+        title_pool = self._parse_title_pattern_pool(title_pool_raw)
 
         # Resolve this group's title pattern:
         # 1. From Brief (preferred — already rotated by _build_creative_briefs)
@@ -1239,20 +1526,9 @@ class ContentGenerationHandler:
         style_words = scene.get("风格基调词", "").strip()
         exclude     = scene.get("排除描述", "").strip()
 
-        # Person fields — prefer Persona table, fallback to Scene
-        # P1-3: If Persona has prompt_template, use it as the full person description
+        # Person fields — always render a structured identity lock first; prompt_template only supplements it.
         person_type = scene.get("人物类型", "").strip()
-        _persona_prompt_template = (persona or {}).get("prompt_template", "").strip()
-        if persona:
-            gender     = persona.get("gender", "").strip() or scene.get("性别倾向", "").strip()
-            age_range  = persona.get("age", "").strip()    or scene.get("年龄段", "").strip()
-            appearance = persona.get("appearance", "").strip() or scene.get("外貌风格", "").strip()
-            posture    = persona.get("action", "").strip()     or scene.get("姿态倾向", "").strip()
-        else:
-            gender     = scene.get("性别倾向", "").strip()
-            age_range  = scene.get("年龄段", "").strip()
-            appearance = scene.get("外貌风格", "").strip()
-            posture    = scene.get("姿态倾向", "").strip()
+        persona_lock = self._build_persona_lock(scene, persona=persona, brief=brief)
 
         # Technical parameter fields (single-select, may be empty)
         tech_params = [
@@ -1281,23 +1557,8 @@ class ContentGenerationHandler:
         ]
 
         person_part: list[str] = []
-        if person_type and person_type not in ("无人物",):
-            if _persona_prompt_template:
-                # action (动作倾向) provides specific pose guidance; style is now embedded in prompt_template
-                _posture = (persona or {}).get("action", "").strip()
-                _extra_str = "，" + _posture if _posture else ""
-                person_part = ["", f"【人物】{_persona_prompt_template}{_extra_str}"]
-                # Scene 外貌风格 quality standard: inject when it's a rich description (>12 chars)
-                # e.g. "年轻亚洲女性，精致五官，自然妆感，无过度美颜修图" — ensures photo-realism
-                # Short labels like "精致通勤" (4 chars) are skipped
-                if appearance and len(appearance) > 12:
-                    person_part.append(f"人物质感：{appearance}")
-            else:
-                person_attrs = [x for x in [gender, age_range, appearance, posture] if x]
-                person_line = person_type
-                if person_attrs:
-                    person_line += "，" + "，".join(person_attrs)
-                person_part = ["", f"【人物】{person_line}"]
+        if not self._is_no_person_scene(person_type):
+            person_part = self._render_master_identity_lock(persona_lock)
 
         # Consistency anchor: use Persona consistency_template if present (richer description)
         persona_consistency = ""
@@ -1316,16 +1577,25 @@ class ContentGenerationHandler:
             "【一致性要求】",
             "- 所有图片保持完全相同的产品外观（颜色、材质、细节）",
         ]
-        if persona_consistency:
+        no_person_scene = self._is_no_person_scene(person_type)
+        if no_person_scene:
+            consistency_lines.append("- 纯产品画面中禁止出现人物、人手或人物身份暗示，保持主体单一明确")
+        elif persona_consistency:
             consistency_lines.append(f"- {persona_consistency}")
         else:
             consistency_lines.append("- 同一人物（同一人、同套服装、同款发型）")
         consistency_lines.append("- 统一光线和色彩风格贯穿始终")
         if consistency_strength == "强":
-            consistency_lines.append(
-                "- 【强一致性】人物面孔特征、发型、服装颜色/款式/细节禁止在不同图片间出现任何漂移或变化，"
-                "产品颜色/材质/挂接方式必须完全一致，禁止换人、换装、换发型"
-            )
+            if no_person_scene:
+                consistency_lines.append(
+                    "- 【强一致性】禁止引入人物、手部、第二主体或额外穿搭元素；"
+                    "产品颜色/材质/挂接方式必须完全一致，禁止主体漂移或道具喧宾夺主"
+                )
+            else:
+                consistency_lines.append(
+                    "- 【强一致性】人物面孔特征、发型、服装颜色/款式/细节禁止在不同图片间出现任何漂移或变化，"
+                    "产品颜色/材质/挂接方式必须完全一致，禁止换人、换装、换发型"
+                )
         consistency_part = consistency_lines
 
         # Optional sections, dropped first when over budget
@@ -1380,50 +1650,36 @@ class ContentGenerationHandler:
         scene_zh = scene.get("场景描述_中文", "").strip()
         scene_suffix = f"，{scene_zh}" if scene_zh else ""
 
-        # Build person suffix for shots that should include real people
-        # Persona source (preferred) → Scene fallback
-        # P1-3: use prompt_template as the authoritative person description when available
+        # Build person suffix for shots that should include real people.
+        # prompt_template is now only a supplement; structured lock stays primary.
         person_type = scene.get("人物类型", "").strip()
-        _no_person_types = {"无人物", "纯产品", ""}
-        if person_type and person_type not in _no_person_types:
-            _sub_prompt_template = (persona or {}).get("prompt_template", "").strip()
-            if persona:
-                gender  = persona.get("gender", "").strip() or scene.get("性别倾向", "").strip()
-                age     = persona.get("age", "").strip()    or scene.get("年龄段", "").strip()
-                appear  = persona.get("appearance", "").strip() or scene.get("外貌风格", "").strip()
-                posture = persona.get("action", "").strip()     or scene.get("姿态倾向", "").strip()
-            else:
-                gender  = scene.get("性别倾向", "").strip()
-                age     = scene.get("年龄段", "").strip()
-                appear  = scene.get("外貌风格", "").strip()
-                posture = scene.get("姿态倾向", "").strip()
+        persona_lock = self._build_persona_lock(scene, persona=persona, brief=brief)
+        if not self._is_no_person_scene(person_type):
+            person_desc_parts = [x for x in [persona_lock.get("person_type", ""), persona_lock.get("age", ""), persona_lock.get("appearance", ""), persona_lock.get("style", ""), persona_lock.get("action", "")] if x]
+            person_suffix = f"，画面中有{person_type}"
+            if person_desc_parts:
+                person_suffix += f"（{'、'.join(person_desc_parts)}）"
+            if persona_lock.get("prompt_template"):
+                person_suffix += f"，人物补充描述：{persona_lock['prompt_template']}"
 
-            if _sub_prompt_template:
-                # action (动作倾向) provides specific pose guidance; style is now embedded in prompt_template
-                # Quality standard (外貌风格) is already injected in master_prompt — no duplication needed
-                _posture = (persona or {}).get("action", "").strip()
-                _extra_str = "，" + _posture if _posture else ""
-                person_suffix = f"，画面中有{person_type}（{_sub_prompt_template}{_extra_str}）"
-            else:
-                person_attrs = "、".join(x for x in [gender, age, appear, posture] if x)
-                person_suffix = f"，画面中有{person_type}" + (f"（{person_attrs}）" if person_attrs else "")
-
-            # Consistency anchor — prefer Persona consistency_template; else build from appearance
-            appearance_anchor = "、".join(x for x in [gender, age, appear] if x)
-            if persona and persona.get("consistency_template"):
-                _anchor_text = persona["consistency_template"]
-            elif brief and brief.get("consistency_anchor", {}).get("person"):
-                _anchor_text = brief["consistency_anchor"]["person"]
-            else:
+            _anchor_text = persona_lock.get("anchor", "")
+            if not _anchor_text:
+                appearance_anchor = "、".join(
+                    x for x in [
+                        persona_lock.get("gender", ""),
+                        persona_lock.get("age", ""),
+                        persona_lock.get("appearance", ""),
+                        persona_lock.get("style", ""),
+                    ] if x
+                )
                 _anchor_text = (
                     f"本组所有图片为同一人物（{appearance_anchor}）："
                     "保持完全相同的服装（颜色/款式/细节）、相同发型、相同面孔特征，禁止更换服装或人物"
                 )
-            # consistency_strength=强 appends a hard drift-prohibition clause
             _cs = (brief or {}).get("consistency_strength", "强")
             if _cs == "强":
                 _anchor_text += "；人物面孔/发型/服装禁止漂移，产品细节禁止变化"
-            consistency_note = f"，【一致性约束】{_anchor_text}"
+            consistency_note = f"，【一致性约束】{_anchor_text}{self._render_sub_identity_lock(persona_lock)}"
         else:
             person_suffix = ""
             consistency_note = ""
@@ -1505,6 +1761,7 @@ class ContentGenerationHandler:
 
     def _fill_prompts(
         self,
+        plan_code: str,
         prompt_records: list[dict],
         sku_fields: dict,
         cfg: dict,
@@ -1590,6 +1847,28 @@ class ContentGenerationHandler:
                     subs = self._build_image_sub_prompts(
                         shotplan, scene, img_count, persona=persona, brief=brief
                     )
+                    fingerprint_payload = self._build_prompt_fingerprint_payload(
+                        gid,
+                        scene,
+                        persona,
+                        brief,
+                        master,
+                        subs,
+                        cfg["image_model_name"],
+                        shotplan=shotplan,
+                    )
+                    prompt_fingerprint = self._fingerprint_payload(fingerprint_payload)
+                    self._assert_no_prompt_content_drift(plan_code, gid, prompt_fingerprint, fingerprint_payload)
+                    if brief is not None:
+                        brief["prompt_fingerprint"] = prompt_fingerprint
+                        brief["brief_fingerprint"] = self._fingerprint_payload({
+                            "group_id": gid,
+                            "scene_id": fingerprint_payload["scene_id"],
+                            "persona_id": fingerprint_payload["persona_id"],
+                            "shotplan_id": fingerprint_payload["shotplan_id"],
+                            "brief": fingerprint_payload["brief"],
+                        })
+                        brief["shotplan_id"] = fingerprint_payload["shotplan_id"] or brief.get("shotplan_id", "")
                     f.update_record(table_prompt, record_id, {
                         "总Prompt": master,
                         "子Prompt列表": json.dumps(subs, ensure_ascii=False),
@@ -1773,13 +2052,20 @@ class ContentGenerationHandler:
             pending_folder_path = None
 
             existing_recs = f.list_records(table_content, filter_str=f'CurrentValue.[内容编号] = "{content_code}"')
+            current_prompt_fingerprint = str((briefs.get(gid, {}) or {}).get("prompt_fingerprint") or "").strip()
             if existing_recs:
                 existing_rec = existing_recs[0]
                 content_record_id = existing_rec["record_id"]
                 existing_gen_status = f.get_option(existing_rec, "生成状态")
-                skip_generation = existing_gen_status == "已生成"
+                existing_prompt_fingerprint = self._existing_content_fingerprint(plan_code, gid)
+                same_fingerprint = bool(current_prompt_fingerprint) and current_prompt_fingerprint == existing_prompt_fingerprint
+                skip_generation = existing_gen_status == "已生成" and same_fingerprint
+                if existing_gen_status == "已生成" and existing_prompt_fingerprint and not same_fingerprint:
+                    raise ValueError(
+                        f"内容 {content_code} 已生成，但当前Prompt签名已变化；为避免错位，本次运行已阻断。"
+                    )
                 if skip_generation:
-                    logger.info("Content record %s already generated, skipping", content_code)
+                    logger.info("Content record %s already generated with matching fingerprint, skipping", content_code)
                 else:
                     logger.warning(
                         "Content record %s exists with status=%r — resetting to 生成中 before retry",
@@ -1843,6 +2129,7 @@ class ContentGenerationHandler:
                 "skip_generation": skip_generation,
                 "created_new": created_new,
                 "pending_folder_path": pending_folder_path,
+                "current_prompt_fingerprint": current_prompt_fingerprint,
             }
 
         for runtime in group_runtime.values():
@@ -1861,6 +2148,7 @@ class ContentGenerationHandler:
             content_code = runtime["content_code"]
             content_record_id = runtime["content_record_id"]
             is_img = runtime["is_img"]
+            current_prompt_fingerprint = runtime.get("current_prompt_fingerprint", "")
             if runtime["skip_generation"]:
                 continue
 
@@ -2001,8 +2289,9 @@ class ContentGenerationHandler:
                         # Re-upload images already saved locally (handles partial-failure retry)
                         if self._storage:
                             local_img = self._storage.get_content_path(plan_code, gid) / img_filename
-                            if local_img.exists():
-                                logger.info("Image %d already saved locally for %s, uploading", idx+1, gid)
+                            can_reuse_local = self._can_reuse_local_image_cache(plan_code, gid, current_prompt_fingerprint)
+                            if local_img.exists() and can_reuse_local:
+                                logger.info("Image %d already saved locally for %s with matching fingerprint, uploading", idx+1, gid)
                                 token = self._upload_attachment(
                                     table_content, content_record_id,
                                     f"{content_code}_img{idx+1:02d}.jpg",
@@ -2014,6 +2303,11 @@ class ContentGenerationHandler:
                                     failed_count += 1
                                     logger.warning("Image %d upload returned no token for %s (local file)", idx+1, gid)
                                 continue
+                            if local_img.exists() and not can_reuse_local:
+                                logger.info(
+                                    "Image %d local cache exists for %s but fingerprint is missing/mismatched; forcing regeneration",
+                                    idx+1, gid,
+                                )
                         sub_p = sub_prompts[idx]
                         combined = f"{i_prompt_text}\n\n---\n\n{sub_p}"
                         _image_prompts.append(combined)   # P1-4: record prompt for debug
@@ -2133,6 +2427,18 @@ class ContentGenerationHandler:
                     update["标题句式"]      = brief.get("title_pattern", "")
                     update["叙事角度"]      = brief.get("narrative_angle", "")
                     update["组内一致性锚点"] = ca.get("person", "")
+                    if self._storage:
+                        self._storage.update_content_debug(plan_code, gid, {
+                            "strategy_id": brief.get("strategy_id", ""),
+                            "scene_id": brief.get("scene_id", ""),
+                            "persona_id": brief.get("persona_id", ""),
+                            "shotplan_id": brief.get("shotplan_id", ""),
+                            "title_pattern": brief.get("title_pattern", ""),
+                            "narrative_angle": brief.get("narrative_angle", ""),
+                            "consistency_anchor": ca.get("person", ""),
+                            "prompt_fingerprint": brief.get("prompt_fingerprint", ""),
+                            "brief_fingerprint": brief.get("brief_fingerprint", ""),
+                        })
                 except Exception:
                     logger.debug("Failed to build observability fields for 表4, group=%s", gid, exc_info=True)
 

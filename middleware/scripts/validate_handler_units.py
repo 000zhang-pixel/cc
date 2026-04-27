@@ -105,6 +105,14 @@ class MockFeishu:
         return {"record_id": record_id, "fields": {}}
 
 
+class MockStorage:
+    def __init__(self, content_meta=None):
+        self._content_meta = content_meta or {}
+
+    def read_content_meta(self, plan_code: str, group_id: str):
+        return self._content_meta.get((plan_code, group_id))
+
+
 # ── Fixture helpers ───────────────────────────────────────────────────────────
 
 def _opt(text: str) -> dict:
@@ -245,7 +253,7 @@ TABLES = {
 }
 
 
-def _make_handler(scene_recs=None, persona_recs=None, strategy_recs=None) -> ContentGenerationHandler:
+def _make_handler(scene_recs=None, persona_recs=None, strategy_recs=None, storage=None) -> ContentGenerationHandler:
     table_data = {
         "tbl_scene":    scene_recs    if scene_recs    is not None else SCENES_5,
         "tbl_persona":  persona_recs  if persona_recs  is not None else PERSONAS_3,
@@ -255,7 +263,7 @@ def _make_handler(scene_recs=None, persona_recs=None, strategy_recs=None) -> Con
         feishu=MockFeishu(table_data),
         tables=TABLES,
         model_params={},
-        local_storage=None,
+        local_storage=storage,
     )
 
 
@@ -389,6 +397,40 @@ def test_persona_fixed_mode():
 run_test("_assign_personas: 固定主人设 → 3 组相同", test_persona_fixed_mode)
 
 
+def test_persona_skipped_for_no_person_scene():
+    h = _make_handler()
+    scene_assignments = {
+        "g01": {"人物类型": "无人物·纯产品", "适合人设标签": [], "场景主题": "居家"},
+        "g02": {"人物类型": "亚洲女性", "适合人设标签": ["青春"], "场景主题": "校园"},
+        "g03": {"人物类型": "有人物·主体", "适合人设标签": ["清冷"], "场景主题": "咖啡馆"},
+    }
+    cfg = {**CFG_BASE, "persona_mode": "自动"}
+    result = h._assign_personas(GROUPS, SKU_FIELDS, cfg, scene_assignments)
+    assert result["g01"] is None, "纯产品场景不应分配 persona"
+    assert result["g02"] is not None and result["g03"] is not None, "有人物场景仍应正常分配 persona"
+
+
+run_test("_assign_personas: 无人物·纯产品 场景不分配 persona", test_persona_skipped_for_no_person_scene)
+
+
+def test_persona_fallback_skips_no_person_scene():
+    """Persona 表无可用记录时，Scene fallback 也不能给无人物·纯产品场景伪造 persona。"""
+    h = _make_handler(persona_recs=[])
+    scene_assignments = {
+        "g01": {"人物类型": "无人物·纯产品", "性别倾向": "", "年龄段": "", "外貌风格": "", "姿态倾向": ""},
+        "g02": {"人物类型": "亚洲女性", "性别倾向": "女", "年龄段": "22-26", "外貌风格": "自然妆容", "姿态倾向": "自然持握"},
+        "g03": {"人物类型": "", "性别倾向": "", "年龄段": "", "外貌风格": "", "姿态倾向": ""},
+    }
+    cfg = {**CFG_BASE, "persona_mode": "自动"}
+    result = h._assign_personas(GROUPS, SKU_FIELDS, cfg, scene_assignments)
+    assert result["g01"] is None, "fallback: 无人物·纯产品场景不应分配 persona"
+    assert result["g03"] is None, "fallback: 空人物类型场景不应分配 persona"
+    assert result["g02"] is not None and result["g02"]["source"] == "scene_fallback", "fallback: 有人物场景应生成 scene_fallback persona"
+
+
+run_test("_assign_personas fallback: 无人物·纯产品 场景不分配 persona", test_persona_fallback_skips_no_person_scene)
+
+
 # ── Test 6–8: _build_creative_briefs ─────────────────────────────────────────
 print("\n[_build_creative_briefs]")
 
@@ -434,6 +476,153 @@ def test_briefs_high_ge_mid():
 
 
 run_test("_build_creative_briefs: 高 叙事差异度 ≥ 中", test_briefs_high_ge_mid)
+
+
+print("\n[prompt guardrails]")
+
+
+def test_master_prompt_includes_identity_lock_and_style():
+    h = _make_handler()
+    scene = {
+        "scene_id": "SC001",
+        "场景描述_中文": "化妆台暖光氛围",
+        "风格基调词": "甜美,暖光",
+        "排除描述": "",
+        "人物类型": "有人物·主体",
+        "性别倾向": "女",
+        "年龄段": "18-22",
+        "外貌风格": "自然卷/内扣发，粉嫩少女妆",
+        "姿态倾向": "捧脸微笑",
+    }
+    persona = {
+        "persona_id": "PS007",
+        "persona_label": "甜美软妹女生",
+        "gender": "女",
+        "age": "18-22",
+        "appearance": "自然卷/内扣发，粉嫩少女妆",
+        "style": "甜美粉色穿搭，蝴蝶结元素",
+        "action": "捧脸、托腮、微笑",
+        "prompt_template": "Asian girl, bright sparkling eyes, cheerful lively smile",
+        "consistency_template": "同一女生，自然卷/内扣发，粉嫩少女妆，甜美粉色穿搭，同套服装，相同面孔特征",
+    }
+    brief = {
+        "consistency_anchor": {"person": persona["consistency_template"]},
+        "consistency_strength": "强",
+    }
+    sku_fields = {"产品简称": "彩虹小马手机链", "颜色": ["粉"], "材质": ["树脂"], "风格": ["甜美"]}
+    prompt = h._build_image_master_prompt(None, sku_fields, scene, persona=persona, brief=brief)
+    assert "【人物锁定卡】" in prompt, "master prompt 应包含人物锁定卡"
+    assert "穿搭锁定" in prompt and "甜美粉色穿搭" in prompt, "穿搭风格应被强注入"
+    assert "人物补充描述" in prompt, "prompt_template 应降级为补充描述而非唯一人物描述"
+
+
+run_test("_build_image_master_prompt: 注入结构化人物锁定卡与穿搭锁定", test_master_prompt_includes_identity_lock_and_style)
+
+
+def test_sub_prompt_no_person_scene_does_not_inject_persona():
+    h = _make_handler()
+    scene = {
+        "场景描述_中文": "极简桌面",
+        "人物类型": "无人物·纯产品",
+        "性别倾向": "女",
+        "年龄段": "18-22",
+        "外貌风格": "自然卷/内扣发，粉嫩少女妆",
+        "姿态倾向": "静态陈列",
+    }
+    persona = {
+        "persona_id": "PS007",
+        "gender": "女",
+        "age": "18-22",
+        "appearance": "自然卷/内扣发，粉嫩少女妆",
+        "style": "甜美粉色穿搭",
+        "action": "捧脸",
+        "prompt_template": "Asian girl, cheerful lively smile",
+        "consistency_template": "同一女生，粉嫩少女妆，甜美粉色穿搭",
+    }
+    brief = {"consistency_anchor": {"person": persona["consistency_template"]}, "consistency_strength": "强"}
+    subs = h._build_image_sub_prompts(None, scene, 1, persona=persona, brief=brief)
+    assert "画面中有" not in subs[0], f"纯产品场景不应注入人物: {subs[0]}"
+    assert "人物锁定" not in subs[0], f"纯产品场景不应注入人物锁定: {subs[0]}"
+
+
+run_test("_build_image_sub_prompts: 无人物·纯产品 场景不注入人物", test_sub_prompt_no_person_scene_does_not_inject_persona)
+
+
+def test_master_prompt_no_person_scene_excludes_person_constraints():
+    h = _make_handler()
+    scene = {
+        "scene_id": "SC097",
+        "场景描述_中文": "极简桌面静物",
+        "风格基调词": "干净,高质感",
+        "排除描述": "",
+        "人物类型": "无人物·纯产品",
+        "性别倾向": "女",
+        "年龄段": "18-22",
+        "外貌风格": "自然卷/内扣发，粉嫩少女妆",
+        "姿态倾向": "静态陈列",
+    }
+    brief = {"consistency_anchor": {"person": ""}, "consistency_strength": "强"}
+    sku_fields = {"产品简称": "极简手机链", "颜色": ["米白"], "材质": ["树脂"], "风格": ["通勤"]}
+    prompt = h._build_image_master_prompt(None, sku_fields, scene, persona=None, brief=brief)
+    assert "同一人物" not in prompt, f"纯产品 master prompt 不应包含人物一致性: {prompt}"
+    assert "同套服装" not in prompt, f"纯产品 master prompt 不应包含服装一致性: {prompt}"
+    assert "纯产品画面中禁止出现人物" in prompt, f"纯产品 master prompt 应包含纯产品约束: {prompt}"
+
+
+run_test("_build_image_master_prompt: 无人物·纯产品 场景不注入人物一致性", test_master_prompt_no_person_scene_excludes_person_constraints)
+
+
+def test_prompt_drift_guard_blocks_mismatch():
+    storage = MockStorage({
+        ("PLAN_001", "img01"): {
+            "debug": {"prompt_fingerprint": "old-fingerprint"}
+        }
+    })
+    h = _make_handler(storage=storage)
+    payload = {"scene_id": "SC001", "persona_id": "PS001", "shotplan_id": "SP001"}
+    try:
+        h._assert_no_prompt_content_drift("PLAN_001", "img01", "new-fingerprint", payload)
+    except ValueError as exc:
+        assert "Prompt签名不一致" in str(exc), f"unexpected error: {exc}"
+        return
+    raise AssertionError("Prompt drift guard 应阻断签名不一致的重跑")
+
+
+run_test("prompt drift guard: 已生成内容签名不一致时阻断重跑", test_prompt_drift_guard_blocks_mismatch)
+
+
+def test_local_cache_reuse_requires_matching_fingerprint():
+    storage = MockStorage({
+        ("PLAN_001", "img01"): {"debug": {}},
+        ("PLAN_001", "img02"): {"debug": {"prompt_fingerprint": "match-me"}},
+    })
+    h = _make_handler(storage=storage)
+    assert h._can_reuse_local_image_cache("PLAN_001", "img01", "match-me") is False, "历史无 fingerprint 时不应复用本地旧图"
+    assert h._can_reuse_local_image_cache("PLAN_001", "img02", "match-me") is True, "fingerprint 匹配时应允许复用本地缓存"
+    assert h._can_reuse_local_image_cache("PLAN_001", "img02", "other") is False, "fingerprint 不匹配时不应复用本地缓存"
+
+
+run_test("local image cache guard: 仅 fingerprint 匹配时允许复用本地旧图", test_local_cache_reuse_requires_matching_fingerprint)
+
+
+print("\n[title pool parsing]")
+
+
+def test_title_pool_parser_supports_json_array():
+    values = ContentGenerationHandler._parse_title_pattern_pool('["标题A", "标题B"]')
+    assert values == ["标题A", "标题B"], f"JSON 数组应原样解析; got {values}"
+
+
+run_test("_parse_title_pattern_pool: 支持 JSON 数组", test_title_pool_parser_supports_json_array)
+
+
+def test_title_pool_parser_supports_multiline_fallback():
+    raw = "标题公式A\n标题公式B\n标题公式C"
+    values = ContentGenerationHandler._parse_title_pattern_pool(raw)
+    assert values == ["标题公式A", "标题公式B", "标题公式C"], f"多行文本应被解析; got {values}"
+
+
+run_test("_parse_title_pattern_pool: 支持多行文本回退解析", test_title_pool_parser_supports_multiline_fallback)
 
 
 # ── Summary ───────────────────────────────────────────────────────────────────

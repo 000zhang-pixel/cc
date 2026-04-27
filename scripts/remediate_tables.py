@@ -231,7 +231,11 @@ def _strategy_defaults(record: dict) -> dict[str, Any]:
     }
 
     return {
-        "标题句式池": f"{strategy_name}｜{content_type}｜{tone}\n被问爆的{content_type}灵感来了\n{angle}风内容这样写更容易出片",
+        "标题句式池": json.dumps([
+            f"{strategy_name}适合从具体场景切入",
+            f"被问爆的{content_type}标题灵感之一",
+            f"{angle}风内容可优先突出真实变化感",
+        ], ensure_ascii=False),
         "叙事角度标签": angle_tags_map.get(content_type, ["日常实用", "细节质感"]),
         "结构模式": structure_map.get(content_type, "体验切入"),
         "差异化提示模板": f"围绕{angle}与{tone}展开，不重复常见套路，优先突出手机壳/手机链在具体生活场景中的可见变化。",

@@ -65,6 +65,25 @@ def validate_plan(plan: dict, selected_tables: set[str]) -> list[str]:
         semantic_action = op.get('semantic_action')
         if semantic_action and semantic_action not in allowed_semantics:
             errors.append(f'unsupported semantic_action: {semantic_action} for {key}')
+
+    expected_summary = plan.get('summary') or {}
+    actual_summary = summarize(ops)
+    for table_key in CODE_FIELD:
+        expected_table = expected_summary.get(table_key) or {}
+        actual_table = actual_summary.get(table_key) or {'update': 0, 'create': 0, 'semantic': {}}
+        for action in ('update', 'create'):
+            expected_count = expected_table.get(action)
+            actual_count = actual_table.get(action, 0)
+            if expected_count is not None and expected_count != actual_count:
+                errors.append(f'summary.{table_key}.{action} mismatch: expected={expected_count} actual={actual_count}')
+        expected_semantic = expected_table.get('semantic') or {}
+        actual_semantic = actual_table.get('semantic', {})
+        for semantic_key, expected_count in expected_semantic.items():
+            actual_count = actual_semantic.get(semantic_key, 0)
+            if expected_count != actual_count:
+                errors.append(
+                    f'summary.{table_key}.semantic.{semantic_key} mismatch: expected={expected_count} actual={actual_count}'
+                )
     return errors
 
 
@@ -112,6 +131,22 @@ def main() -> int:
     selected_tables = parse_csv_set(args.tables)
     selected_semantics = parse_csv_set(args.semantic_actions)
     allowed_semantics = {'disable', 'downgrade', 'keep', 'rewrite', 'add'}
+    allowed_tables = set(CODE_FIELD)
+    invalid_tables = sorted(selected_tables - allowed_tables)
+    if not selected_tables:
+        print(json.dumps({
+            'ok': False,
+            'phase': 'args',
+            'errors': ['no tables selected; use --tables strategy,shotplan,scene,persona or a subset'],
+        }, ensure_ascii=False, indent=2))
+        return 1
+    if invalid_tables:
+        print(json.dumps({
+            'ok': False,
+            'phase': 'args',
+            'errors': [f'unsupported tables: {invalid_tables}'],
+        }, ensure_ascii=False, indent=2))
+        return 1
     invalid_semantics = sorted(selected_semantics - allowed_semantics)
     if invalid_semantics:
         print(json.dumps({

@@ -61,6 +61,15 @@ def _text(val: Any) -> str | None:
     return str(val)
 
 
+def _plan_confirmed(val: Any) -> bool:
+    return _text(val) in {"是", "立即执行"}
+
+
+def _plan_status(val: Any) -> str | None:
+    status = _text(val)
+    return status if status in {"待执行", "执行中", "完成", "失败"} else None
+
+
 def _attachment_urls(val: Any) -> str | None:
     """Extract URL list from Feishu attachment field."""
     if not val:
@@ -314,6 +323,7 @@ class FeishuSyncer:
                                 if k in _STATUS_FIELDS:
                                     continue  # never overwrite local status
                                 setattr(existing, k, v)
+                            self._reconcile_remote_plan_state(existing, raw)
                             existing.synced_at = datetime.utcnow()
                             if record_id_changed:
                                 logger.info(
@@ -357,6 +367,35 @@ class FeishuSyncer:
                     sync_count=count,
                 ))
             session.commit()
+
+    def _reconcile_remote_plan_state(self, existing: Any, raw: dict) -> None:
+        if not isinstance(existing, Plan):
+            return
+        fields = raw.get("fields") or {}
+        remote_status = _plan_status(fields.get("执行状态"))
+        if not remote_status:
+            return
+
+        existing.confirmed_exec = _plan_confirmed(fields.get("确认执行"))
+
+        if remote_status == "完成":
+            existing.exec_status = "完成"
+            existing.finished_at = _ms_to_dt(fields.get("任务完成时间")) or existing.finished_at or datetime.utcnow()
+            remote_log = _text(fields.get("任务日志"))
+            if remote_log:
+                existing.error_msg = remote_log
+            return
+
+        if remote_status == "失败":
+            existing.exec_status = "失败"
+            existing.finished_at = _ms_to_dt(fields.get("任务完成时间")) or existing.finished_at or datetime.utcnow()
+            remote_log = _text(fields.get("任务日志"))
+            if remote_log:
+                existing.error_msg = remote_log
+            return
+
+        if remote_status == "执行中" and existing.exec_status == "待执行":
+            existing.exec_status = "执行中"
 
     # ------------------------------------------------------------------
     # Mappers: Feishu raw record → ORM object (unsaved)

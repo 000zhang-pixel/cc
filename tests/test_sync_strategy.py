@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
 
-from db.models import Base, SyncCursor, make_engine
+from db.models import Base, Plan, SyncCursor, make_engine
 from db.sync.syncer import FeishuSyncer
 
 
@@ -91,6 +91,50 @@ class SyncStrategyTests(unittest.TestCase):
 
         self.assertEqual(len(fake.calls), 6)
         self.assertTrue(all(filter_str is None for _, filter_str in fake.calls))
+
+    def test_plan_sync_reconciles_local_status_when_remote_record_is_completed(self):
+        class PlanFeishu(FakeFeishu):
+            def list_records(self, table_id: str, filter_str: str | None = None, page_size: int = 100):
+                self.calls.append((table_id, filter_str))
+                if table_id != TABLE_IDS["plan"]:
+                    return []
+                return [{
+                    "record_id": "rec_plan_done",
+                    "fields": {
+                        "规划编号": "T_260507_109",
+                        "任务名称": "得物9篇好物精选",
+                        "任务类型": "AI全创作",
+                        "内容类型": ["种草推荐"],
+                        "目标平台": ["得物"],
+                        "确认执行": "是",
+                        "执行状态": "完成",
+                        "任务完成时间": 1778209185628,
+                        "任务日志": "完成时间: 2026-05-08 10:59:45\n共生成 5 条内容记录",
+                    },
+                }]
+
+        fake = PlanFeishu()
+        syncer = FeishuSyncer(fake, TABLE_IDS, engine=self.engine)
+
+        with Session(self.engine) as session:
+            session.add(Plan(
+                feishu_record_id="rec_plan_done",
+                plan_code="T_260507_109",
+                task_name="得物9篇好物精选",
+                task_type="AI全创作",
+                exec_status="待执行",
+                confirmed_exec=False,
+            ))
+            session.commit()
+
+        syncer.sync_plans(run_mode="full_scan", reason="manual")
+
+        with Session(self.engine) as session:
+            plan = session.query(Plan).filter_by(plan_code="T_260507_109").one()
+            self.assertEqual(plan.exec_status, "完成")
+            self.assertTrue(plan.confirmed_exec)
+            self.assertIsNotNone(plan.finished_at)
+            self.assertIn("共生成 5 条内容记录", plan.error_msg or "")
 
 
 if __name__ == "__main__":

@@ -47,6 +47,53 @@ def test_registry_can_read_capability_from_model_params_provider_config():
     assert capability['primary_reference_mode'] == 'reference_image'
 
 
+def test_registry_yaml_capability_overrides_code_fallback_when_both_exist():
+    model_params = {
+        'image_model': {
+            'providers': {
+                'gpt-image-2': {
+                    'capability': {
+                        'prompt_policy': 'identity_first',
+                        'sub_prompt_identity_lock': True,
+                    }
+                }
+            }
+        }
+    }
+
+    capability = get_image_model_capability('gpt-image-2', model_params=model_params)
+
+    assert capability['prompt_policy'] == 'identity_first'
+    assert capability['sub_prompt_identity_lock'] is True
+    assert capability['primary_reference_mode'] == 'reference_image'
+
+
+def test_registry_code_capability_only_acts_as_fallback_when_yaml_missing():
+    capability = get_image_model_capability('gpt-image-2', model_params={'image_model': {'providers': {}}})
+
+    assert capability['prompt_policy'] == 'reference_first'
+    assert capability['sub_prompt_identity_lock'] is False
+    assert capability['primary_reference_mode'] == 'reference_image'
+
+
+def test_registry_ignores_malformed_capability_values_in_model_params():
+    model_params = {
+        'image_model': {
+            'providers': {
+                'broken-model': {
+                    'capability': 'reference_first',
+                }
+            }
+        }
+    }
+
+    capability = get_image_model_capability('broken-model', model_params=model_params)
+
+    assert capability['prompt_policy'] == 'identity_first'
+    assert capability['sub_prompt_identity_lock'] is True
+    assert capability['primary_reference_mode'] == 'identity_anchor'
+
+
 def test_registry_merges_model_params_capability_with_default_fallback_fields():
     model_params = {
         'image_model': {

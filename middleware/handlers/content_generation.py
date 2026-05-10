@@ -2365,18 +2365,19 @@ class ContentGenerationHandler:
                     _image_prompts: list[str] = []      # P1-4: accumulate per-image prompts
                     _image_failures: list[dict] = []    # P1-4: accumulate per-image failures
 
-                    # Fetch 白底图 as reference image (Nanobanana only)
+                    # Fetch all 白底图 attachments as reference images for image models that accept ref_images.
                     ref_images: list[bytes] = []
-                    if hasattr(img_adapter, "generate_sequential"):
-                        bai_di_attachments = sku_fields.get("白底图") or []
-                        if bai_di_attachments:
-                            first_token = bai_di_attachments[0].get("file_token") if isinstance(bai_di_attachments[0], dict) else None
-                            if first_token:
-                                try:
-                                    ref_images = [f.download_media(first_token)]
-                                    logger.info("Loaded 白底图 reference image (file_token=%s)", first_token)
-                                except Exception as exc:
-                                    logger.warning("Failed to download 白底图, proceeding without reference: %s", exc)
+                    bai_di_attachments = sku_fields.get("白底图") or []
+                    if bai_di_attachments:
+                        for attachment in bai_di_attachments:
+                            file_token = attachment.get("file_token") if isinstance(attachment, dict) else None
+                            if not file_token:
+                                continue
+                            try:
+                                ref_images.append(f.download_media(file_token))
+                                logger.info("Loaded 白底图 reference image (file_token=%s)", file_token)
+                            except Exception as exc:
+                                logger.warning("Failed to download 白底图 %s, skipping: %s", file_token, exc)
 
                     # Generate, upload, and save each image immediately (don't batch)
                     is_nanobanana = hasattr(img_adapter, "generate_sequential")

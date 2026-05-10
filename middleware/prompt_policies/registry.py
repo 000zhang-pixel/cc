@@ -5,7 +5,7 @@ DEFAULT_IMAGE_MODEL_CAPABILITY = {
 }
 
 
-IMAGE_MODEL_CAPABILITIES = {
+FALLBACK_IMAGE_MODEL_CAPABILITIES = {
     'gpt-image-2': {
         'prompt_policy': 'reference_first',
         'sub_prompt_identity_lock': False,
@@ -23,12 +23,14 @@ def _get_model_params_capability(model_name: str, model_params=None) -> dict:
     providers = ((model_params or {}).get('image_model') or {}).get('providers') or {}
     provider_cfg = providers.get(model_name) or {}
     capability = provider_cfg.get('capability') or {}
+    if not isinstance(capability, dict):
+        return {}
     return dict(capability)
 
 
 def get_image_model_capability(model_name: str, override: dict | None = None, model_params=None) -> dict:
     capability = dict(DEFAULT_IMAGE_MODEL_CAPABILITY)
-    capability.update(IMAGE_MODEL_CAPABILITIES.get(model_name, {}))
+    capability.update(FALLBACK_IMAGE_MODEL_CAPABILITIES.get(model_name, {}))
     capability.update(_get_model_params_capability(model_name, model_params=model_params))
     if override:
         capability.update(override)

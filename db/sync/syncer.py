@@ -27,7 +27,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from db.models import (
-    Sku, Plan, Content, PublishRecord, Material, Tag,
+    Sku, Plan, Prompt, Content, PublishRecord, Material, Tag,
     SyncCursor, make_engine,
 )
 
@@ -94,6 +94,7 @@ class FeishuSyncer:
     _NATURAL_KEY_FIELDS = {
         Sku: ("sku_code",),
         Plan: ("plan_code",),
+        Prompt: ("prompt_code",),
         Content: ("content_code",),
         PublishRecord: ("pub_code",),
         Material: ("material_code",),
@@ -184,6 +185,7 @@ class FeishuSyncer:
         logger.info("[Sync] Starting %s of all tables", self._run_label(reason=reason, run_mode=run_mode))
         self.sync_skus(run_mode=run_mode, reason=reason)
         self.sync_plans(run_mode=run_mode, reason=reason)
+        self.sync_prompts(run_mode=run_mode, reason=reason)
         self.sync_contents(run_mode=run_mode, reason=reason)
         self.sync_publish_records(run_mode=run_mode, reason=reason)
         self.sync_materials(run_mode=run_mode, reason=reason)
@@ -206,6 +208,16 @@ class FeishuSyncer:
             table_id=self.table_ids["plan"],
             mapper=self._map_plan,
             model_cls=Plan,
+            run_mode=run_mode,
+            reason=reason,
+        )
+
+    def sync_prompts(self, *, run_mode: str | None = None, reason: str = "manual"):
+        self._sync_table(
+            cursor_key="feishu_prompt",
+            table_id=self.table_ids["prompt"],
+            mapper=self._map_prompt,
+            model_cls=Prompt,
             run_mode=run_mode,
             reason=reason,
         )
@@ -324,6 +336,7 @@ class FeishuSyncer:
                                     continue  # never overwrite local status
                                 setattr(existing, k, v)
                             self._reconcile_remote_plan_state(existing, raw)
+                            self._reconcile_remote_content_state(existing, raw)
                             existing.synced_at = datetime.utcnow()
                             if record_id_changed:
                                 logger.info(
@@ -397,6 +410,31 @@ class FeishuSyncer:
         if remote_status == "执行中" and existing.exec_status == "待执行":
             existing.exec_status = "执行中"
 
+    def _reconcile_remote_content_state(self, existing: Any, raw: dict) -> None:
+        if not isinstance(existing, Content):
+            return
+        fields = raw.get("fields") or {}
+        remote_status = _text(fields.get("生成状态"))
+        if remote_status not in {"生成中", "已生成", "生成失败"}:
+            return
+
+        remote_error = _text(fields.get("失败原因"))
+
+        if remote_status == "生成失败":
+            existing.gen_status = "生成失败"
+            if remote_error:
+                existing.error_msg = remote_error
+            return
+
+        if remote_status == "已生成":
+            existing.gen_status = "已生成"
+            if remote_error is not None:
+                existing.error_msg = remote_error or None
+            return
+
+        if remote_status == "生成中" and existing.gen_status not in {"已生成", "生成失败"}:
+            existing.gen_status = "生成中"
+
     # ------------------------------------------------------------------
     # Mappers: Feishu raw record → ORM object (unsaved)
     # ------------------------------------------------------------------
@@ -463,6 +501,45 @@ class FeishuSyncer:
             video_model         = _text(f.get("视频模型")),
             notes               = _text(f.get("备注")),
             # exec_status intentionally not mapped — local is authoritative
+        )
+
+    def _map_prompt(self, raw: dict, session: Session) -> Prompt | None:
+        f = raw["fields"]
+        prompt_code = _text(f.get("提示词编号"))
+        if not prompt_code:
+            return None
+
+        plan_id = None
+        linked_plan_ids = _linked_record_ids(f.get("关联规划"))
+        if linked_plan_ids:
+            plan = session.execute(
+                select(Plan).where(Plan.feishu_record_id == linked_plan_ids[0])
+            ).scalar_one_or_none()
+            if plan:
+                plan_id = plan.id
+
+        sku_id = None
+        linked_sku_ids = _linked_record_ids(f.get("关联SKU"))
+        if linked_sku_ids:
+            sku = session.execute(
+                select(Sku).where(Sku.feishu_record_id == linked_sku_ids[0])
+            ).scalar_one_or_none()
+            if sku:
+                sku_id = sku.id
+
+        return Prompt(
+            feishu_record_id    = raw["record_id"],
+            prompt_code         = prompt_code,
+            plan_id             = plan_id,
+            sku_id              = sku_id,
+            group_id            = _text(f.get("组号")),
+            prompt_type         = _text(f.get("Prompt类型")),
+            master_prompt       = _text(f.get("总Prompt")),
+            sub_prompts         = _text(f.get("子Prompt列表")),
+            version             = f.get("版本号") or 1,
+            source              = _text(f.get("生成来源")),
+            model_used          = _text(f.get("使用模型")),
+            status              = _text(f.get("状态")) or "草稿",
         )
 
     def _map_content(self, raw: dict, session: Session) -> Content | None:

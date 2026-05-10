@@ -12,6 +12,7 @@ import base64
 import logging
 import threading
 import time
+import queue
 from abc import ABC, abstractmethod
 
 import httpx
@@ -136,15 +137,19 @@ class TextModelAdapter:
                     if self._reasoning is not None:
                         kwargs["reasoning"] = {"effort": "minimal" if self._reasoning else "none"}
                     if self._api_mode == "codex-responses":
+                        logger.info("TextModelAdapter codex-responses start: model=%s base_url=%s", self._provider, getattr(self._client, 'base_url', None))
                         fragments = []
                         with self._client.responses.stream(**kwargs) as stream:
+                            logger.info("TextModelAdapter codex-responses stream opened: model=%s", self._provider)
                             for event in stream:
                                 event_type = getattr(event, "type", None)
                                 if event_type in {"response.output_text.delta", "response.refusal.delta"}:
                                     delta = getattr(event, "delta", None)
                                     if delta:
                                         fragments.append(delta)
+                            logger.info("TextModelAdapter codex-responses stream consumed: model=%s fragments=%d", self._provider, len(fragments))
                             resp = stream.get_final_response()
+                            logger.info("TextModelAdapter codex-responses final response ready: model=%s", self._provider)
                         text = "".join(fragments).strip()
                         return text or self._extract_response_text(resp)
                     resp = self._client.responses.create(**kwargs)
@@ -438,6 +443,133 @@ class VolcEngineImageAdapter:
         return _with_retry(_call, self._retry_max, self._retry_base)
 
 
+class OpenAIImageAdapter:
+    """Calls an OpenAI-compatible image generation endpoint and returns raw image bytes."""
+
+    def __init__(self, cfg: dict, shared_cfg: dict):
+        self._client = OpenAI(
+            api_key=cfg["api_key"],
+            base_url=cfg.get("base_url", "https://api.openai.com/v1"),
+        )
+        self._model = cfg["model"]
+        self._image_model = cfg.get("image_model")
+        self._size = cfg.get("size", "1024x1024")
+        self._stream_timeout_seconds = int(cfg.get("stream_timeout_seconds", 240))
+        self._semaphore = _get_semaphore("image", shared_cfg["max_concurrency"])
+        self._retry_max = shared_cfg["retry_max"]
+        self._retry_base = shared_cfg["retry_base_seconds"]
+
+    def generate(self, prompt: str, ref_images: list[bytes] | None = None) -> bytes:
+        def _stream_response_image(request_content: list[dict], error_message: str) -> bytes:
+            result_queue: queue.Queue = queue.Queue(maxsize=1)
+
+            def _worker() -> None:
+                try:
+                    logger.info(
+                        "OpenAIImageAdapter stream start: model=%s image_model=%s size=%s content_items=%d",
+                        self._model, self._image_model, self._size, len(request_content),
+                    )
+                    with self._client.responses.stream(
+                        model=self._model,
+                        store=False,
+                        input=[{
+                            "type": "message",
+                            "role": "user",
+                            "content": request_content,
+                        }],
+                        tools=[{
+                            "type": "image_generation",
+                            "model": self._image_model,
+                            "size": self._size,
+                            "output_format": "png",
+                            "background": "opaque",
+                            "partial_images": 1,
+                        }],
+                        tool_choice={
+                            "type": "allowed_tools",
+                            "mode": "required",
+                            "tools": [{"type": "image_generation"}],
+                        },
+                    ) as stream:
+                        for event in stream:
+                            event_type = getattr(event, "type", "")
+                            if event_type:
+                                logger.info("OpenAIImageAdapter stream event: %s", event_type)
+                            if event_type == "response.image_generation_call.partial_image":
+                                partial = getattr(event, "partial_image_b64", None)
+                                if isinstance(partial, str) and partial:
+                                    result_queue.put(base64.b64decode(partial))
+                                    return
+                            if event_type == "response.output_item.done":
+                                item = getattr(event, "item", None)
+                                if getattr(item, "type", None) == "image_generation_call":
+                                    result = getattr(item, "result", None)
+                                    if isinstance(result, str) and result:
+                                        result_queue.put(base64.b64decode(result))
+                                        return
+                    result_queue.put(RuntimeError(error_message))
+                except BaseException as exc:
+                    logger.exception("OpenAIImageAdapter stream failed")
+                    result_queue.put(exc)
+
+            worker = threading.Thread(target=_worker, daemon=True)
+            worker.start()
+            worker.join(timeout=self._stream_timeout_seconds)
+            if worker.is_alive():
+                raise TimeoutError(
+                    f"OpenAIImageAdapter stream timed out after {self._stream_timeout_seconds}s "
+                    f"(model={self._model}, image_model={self._image_model})"
+                )
+            result = result_queue.get_nowait()
+            if isinstance(result, BaseException):
+                raise result
+            return result
+
+        def _call():
+            with self._semaphore:
+                if self._image_model:
+                    content = [{"type": "input_text", "text": prompt}]
+                    for img_bytes in (ref_images or []):
+                        mime = ImageModelAdapter._detect_mime(img_bytes)
+                        data_url = f"data:{mime};base64,{base64.b64encode(img_bytes).decode('utf-8')}"
+                        content.append({"type": "input_image", "image_url": data_url})
+                    try:
+                        logger.info(
+                            "OpenAIImageAdapter generate start: model=%s image_model=%s prompt_len=%d ref_images=%d",
+                            self._model, self._image_model, len(prompt), len(ref_images or []),
+                        )
+                        return _stream_response_image(content, "OpenAI responses image: no image data in response stream")
+                    except Exception:
+                        if ref_images:
+                            logger.warning(
+                                "OpenAI image multimodal reference call failed; retrying once without ref_images",
+                                exc_info=True,
+                            )
+                            return _stream_response_image(
+                                [{"type": "input_text", "text": prompt}],
+                                "OpenAI responses image: no image data in fallback response stream",
+                            )
+                        raise
+
+                resp = self._client.images.generate(
+                    model=self._model,
+                    prompt=prompt,
+                    size=self._size,
+                    n=1,
+                )
+                item = resp.data[0]
+                if item.b64_json:
+                    return base64.b64decode(item.b64_json)
+                if item.url:
+                    with httpx.Client(timeout=120) as client:
+                        r = client.get(item.url)
+                        r.raise_for_status()
+                        return r.content
+                raise RuntimeError("OpenAI image: no image data in response")
+
+        return _with_retry(_call, self._retry_max, self._retry_base)
+
+
 # ---------------------------------------------------------------------------
 # Video model adapter (Volcano Engine — ARK async task API)
 # ---------------------------------------------------------------------------
@@ -656,6 +788,8 @@ def build_image_adapter(model_params: dict, provider_name: str = None):
         raise ValueError(
             f"Image model provider {provider_name!r} is not configured with a valid api_key"
         )
+    if provider_name == "gpt-image-2":
+        return OpenAIImageAdapter(provider_cfg, cfg_root)
     if "volcengine" in provider_name:
         return VolcEngineImageAdapter(provider_cfg, cfg_root)
     if provider_cfg.get("endpoint"):

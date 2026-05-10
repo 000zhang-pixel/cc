@@ -8,12 +8,14 @@ import io
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
 
 import lark_oapi as lark
+import requests
 from lark_oapi.api.im.v1 import (
     CreateMessageRequest,
     CreateMessageRequestBody,
@@ -143,6 +145,18 @@ class FeishuClient:
             '"identity": "bot"',
         ))
 
+    @staticmethod
+    def _sdk_read_error_allows_cli_fallback(exc: Exception) -> bool:
+        if isinstance(exc, (requests.exceptions.Timeout, requests.exceptions.ConnectionError)):
+            return True
+        normalized = str(exc).lower()
+        return any(token in normalized for token in (
+            "read timed out",
+            "connection aborted",
+            "connection reset",
+            "temporarily unavailable",
+        ))
+
     def _run_cli_bitable_write(self, *, table_id: str, record_id: str | None, fields: dict) -> dict:
         if not self._cli_command:
             raise RuntimeError("lark-cli command is unavailable")
@@ -191,19 +205,138 @@ class FeishuClient:
             )
         return payload
 
+    def _run_cli_base_command(self, subcommand: str, *, table_id: str, extra_args: list[str] | None = None) -> dict:
+        if not self._cli_command:
+            raise RuntimeError("lark-cli command is unavailable")
+        cmd = [
+            self._cli_command,
+            "base",
+            subcommand,
+            "--as",
+            self._cli_identity,
+            "--base-token",
+            self.base_token,
+            "--table-id",
+            table_id,
+        ]
+        if extra_args:
+            cmd.extend(extra_args)
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        logger.info(
+            "Feishu CLI base command: subcommand=%s table=%s identity=%s profile=%s exit_code=%s",
+            subcommand,
+            table_id,
+            self._cli_identity,
+            self._cli_profile,
+            proc.returncode,
+        )
+        if proc.returncode != 0:
+            raise RuntimeError(
+                "lark-cli base command failed: "
+                f"subcommand={subcommand}, table={table_id}, exit_code={proc.returncode}, "
+                f"stderr={proc.stderr.strip() or proc.stdout.strip()}"
+            )
+        payload = self._parse_cli_json(proc.stdout, action=f"base {subcommand}")
+        if payload.get("ok") is False:
+            error = payload.get("error") or {}
+            raise RuntimeError(
+                "lark-cli base command returned ok=false: "
+                f"subcommand={subcommand}, table={table_id}, error={json.dumps(error, ensure_ascii=False)[:500]}"
+            )
+        return payload
+
+    @staticmethod
+    def _parse_simple_filter(filter_str: str | None) -> tuple[str, str] | None:
+        if not filter_str:
+            return None
+        match = re.fullmatch(r'CurrentValue\.\[(.+?)\]\s*=\s*"((?:\\.|[^"])*)"', filter_str.strip())
+        if not match:
+            return None
+        field_name = match.group(1)
+        raw_value = match.group(2)
+        value = bytes(raw_value, "utf-8").decode("unicode_escape")
+        return field_name, value
+
+    @staticmethod
+    def _cli_row_to_record(fields: list[str], row: list[Any], record_id: str) -> dict:
+        mapped_fields = {field_name: row[idx] if idx < len(row) else None for idx, field_name in enumerate(fields)}
+        return {"record_id": record_id, "fields": mapped_fields}
+
+    def _cli_record_matches_filter(self, record: dict, filter_str: str | None) -> bool:
+        parsed = self._parse_simple_filter(filter_str)
+        if not filter_str:
+            return True
+        if not parsed:
+            raise RuntimeError(f"Unsupported CLI filter syntax: {filter_str!r}")
+        field_name, expected = parsed
+        actual = record.get("fields", {}).get(field_name)
+        if isinstance(actual, list):
+            if all(isinstance(item, str) for item in actual):
+                return expected in actual
+            return False
+        if actual is None:
+            return expected == ""
+        return str(actual) == expected
+
     def get_field_id(self, table_id: str, field_name: str) -> str:
         cache_key = (table_id, field_name)
         cached = self._field_id_cache.get(cache_key)
         if cached:
             return cached
 
-        resp = self._client.bitable.v1.app_table_field.list(
-            ListAppTableFieldRequest.builder()
-            .app_token(self.base_token)
-            .table_id(table_id)
-            .page_size(500)
-            .build()
-        )
+        if self._write_backend == "cli" and self._cli_command:
+            offset = 0
+            while True:
+                payload = self._run_cli_base_command(
+                    "+field-list",
+                    table_id=table_id,
+                    extra_args=["--limit", "100", "--offset", str(offset)],
+                )
+                data = payload.get("data") or {}
+                items = data.get("fields") or []
+                for item in items:
+                    if item.get("name") == field_name and item.get("id"):
+                        self._field_id_cache[cache_key] = item["id"]
+                        return item["id"]
+                if not data.get("has_more"):
+                    break
+                offset += len(items)
+            raise RuntimeError(f"field not found: table={table_id}, field={field_name}")
+
+        try:
+            resp = self._client.bitable.v1.app_table_field.list(
+                ListAppTableFieldRequest.builder()
+                .app_token(self.base_token)
+                .table_id(table_id)
+                .page_size(500)
+                .build()
+            )
+        except Exception as exc:
+            if self._cli_command and self._sdk_read_error_allows_cli_fallback(exc):
+                logger.warning(
+                    "Falling back to CLI get_field_id after SDK read failure: table=%s field=%s error=%s",
+                    table_id,
+                    field_name,
+                    exc,
+                )
+                offset = 0
+                while True:
+                    payload = self._run_cli_base_command(
+                        "+field-list",
+                        table_id=table_id,
+                        extra_args=["--limit", "100", "--offset", str(offset)],
+                    )
+                    data = payload.get("data") or {}
+                    items = data.get("fields") or []
+                    for item in items:
+                        if item.get("name") == field_name and item.get("id"):
+                            self._field_id_cache[cache_key] = item["id"]
+                            return item["id"]
+                    if not data.get("has_more"):
+                        break
+                    offset += len(items)
+                raise RuntimeError(f"field not found: table={table_id}, field={field_name}")
+            raise
         if not resp.success():
             raise RuntimeError(
                 f"list_fields failed [{resp.code}]: {resp.msg} (table={table_id})"
@@ -368,6 +501,29 @@ class FeishuClient:
         page_size: int = 100,
     ) -> list[dict]:
         """Return all records from a table, auto-paginating. Each item is {record_id, fields}."""
+        if self._write_backend == "cli" and self._cli_command:
+            records = []
+            offset = 0
+            while True:
+                payload = self._run_cli_base_command(
+                    "+record-list",
+                    table_id=table_id,
+                    extra_args=["--limit", str(page_size), "--offset", str(offset)],
+                )
+                data = payload.get("data") or {}
+                rows = data.get("data") or []
+                field_names = data.get("fields") or []
+                record_ids = data.get("record_id_list") or []
+                for idx, row in enumerate(rows):
+                    record_id = record_ids[idx] if idx < len(record_ids) else ""
+                    record = self._cli_row_to_record(field_names, row, record_id)
+                    if self._cli_record_matches_filter(record, filter_str):
+                        records.append(record)
+                if not data.get("has_more"):
+                    break
+                offset += len(rows)
+            return records
+
         records = []
         page_token = None
 
@@ -383,7 +539,37 @@ class FeishuClient:
             if page_token:
                 req_builder = req_builder.page_token(page_token)
 
-            resp = self._client.bitable.v1.app_table_record.list(req_builder.build())
+            try:
+                resp = self._client.bitable.v1.app_table_record.list(req_builder.build())
+            except Exception as exc:
+                if self._cli_command and self._sdk_read_error_allows_cli_fallback(exc):
+                    logger.warning(
+                        "Falling back to CLI list_records after SDK read failure: table=%s filter=%s error=%s",
+                        table_id,
+                        filter_str,
+                        exc,
+                    )
+                    records = []
+                    offset = 0
+                    while True:
+                        payload = self._run_cli_base_command(
+                            "+record-list",
+                            table_id=table_id,
+                            extra_args=["--limit", str(page_size), "--offset", str(offset)],
+                        )
+                        data = payload.get("data") or {}
+                        rows = data.get("data") or []
+                        field_names = data.get("fields") or []
+                        record_ids = data.get("record_id_list") or []
+                        for idx, row in enumerate(rows):
+                            record_id = record_ids[idx] if idx < len(record_ids) else ""
+                            record = self._cli_row_to_record(field_names, row, record_id)
+                            if self._cli_record_matches_filter(record, filter_str):
+                                records.append(record)
+                        if not data.get("has_more"):
+                            return records
+                        offset += len(rows)
+                raise
             if not resp.success():
                 raise RuntimeError(
                     f"list_records failed [{resp.code}]: {resp.msg} "
@@ -402,13 +588,39 @@ class FeishuClient:
 
     def get_record(self, table_id: str, record_id: str) -> dict:
         """Return a single record as {record_id, fields}."""
-        resp = self._client.bitable.v1.app_table_record.get(
-            GetAppTableRecordRequest.builder()
-            .app_token(self.base_token)
-            .table_id(table_id)
-            .record_id(record_id)
-            .build()
-        )
+        if self._write_backend == "cli" and self._cli_command:
+            payload = self._run_cli_base_command(
+                "+record-get",
+                table_id=table_id,
+                extra_args=["--record-id", record_id],
+            )
+            record = ((payload.get("data") or {}).get("record") or {})
+            return {"record_id": record_id, "fields": record}
+
+        try:
+            resp = self._client.bitable.v1.app_table_record.get(
+                GetAppTableRecordRequest.builder()
+                .app_token(self.base_token)
+                .table_id(table_id)
+                .record_id(record_id)
+                .build()
+            )
+        except Exception as exc:
+            if self._cli_command and self._sdk_read_error_allows_cli_fallback(exc):
+                logger.warning(
+                    "Falling back to CLI get_record after SDK read failure: table=%s record=%s error=%s",
+                    table_id,
+                    record_id,
+                    exc,
+                )
+                payload = self._run_cli_base_command(
+                    "+record-get",
+                    table_id=table_id,
+                    extra_args=["--record-id", record_id],
+                )
+                record = ((payload.get("data") or {}).get("record") or {})
+                return {"record_id": record_id, "fields": record}
+            raise
         if not resp.success():
             raise RuntimeError(
                 f"get_record failed [{resp.code}]: {resp.msg} "
@@ -547,6 +759,14 @@ class FeishuClient:
 
     def delete_record(self, table_id: str, record_id: str) -> None:
         """Delete a record by record_id."""
+        if self._write_backend == "cli" and self._cli_command:
+            self._run_cli_base_command(
+                "+record-delete",
+                table_id=table_id,
+                extra_args=["--record-id", record_id, "--yes"],
+            )
+            return
+
         resp = self._client.bitable.v1.app_table_record.delete(
             DeleteAppTableRecordRequest.builder()
             .app_token(self.base_token)
@@ -567,13 +787,20 @@ class FeishuClient:
         return record.get("fields", {}).get(field, default)
 
     def get_text(self, record: dict, field: str, default: str = "") -> str:
-        """Extract plain text (handles Feishu rich-text list format)."""
+        """Extract plain text from common Feishu field shapes."""
         val = self.get_field(record, field)
         if val is None:
             return default
         if isinstance(val, list):
-            # Rich-text format: [{type, text}, ...]
-            return "".join(seg.get("text", "") for seg in val if isinstance(seg, dict))
+            parts = []
+            for seg in val:
+                if isinstance(seg, dict):
+                    text = seg.get("text")
+                    if isinstance(text, str):
+                        parts.append(text)
+                elif isinstance(seg, str):
+                    parts.append(seg)
+            return "".join(parts) if parts else default
         return str(val)
 
     def get_option(self, record: dict, field: str, default: str = "") -> str:
@@ -583,6 +810,15 @@ class FeishuClient:
             return default
         if isinstance(val, dict):
             return val.get("text", default)
+        if isinstance(val, list):
+            if not val:
+                return default
+            first = val[0]
+            if isinstance(first, dict):
+                return first.get("text", default)
+            if isinstance(first, str):
+                return first
+            return default
         return str(val)
 
     def get_options(self, record: dict, field: str) -> list[str]:
@@ -597,25 +833,36 @@ class FeishuClient:
     def get_link_ids(self, record: dict, field: str) -> list[str]:
         """Extract linked record IDs from a link field.
 
-        Feishu returns link fields as a list of objects:
-        [{"record_ids": ["recXXX"], "table_id": "tbl...", "text": "...", ...}]
+        Supported shapes seen in this project:
+        - [{"record_ids": ["recXXX"], ...}]
+        - [{"id": "recXXX"}]
+        - [{"record_id": "recXXX"}]
+        - ["recXXX"]
         """
         val = self.get_field(record, field)
         if not val:
             return []
+
+        def _extract_ids(item: Any) -> list[str]:
+            if isinstance(item, str):
+                return [item] if item else []
+            if not isinstance(item, dict):
+                return []
+            ids = item.get("record_ids")
+            if isinstance(ids, list):
+                return [i for i in ids if isinstance(i, str) and i]
+            for key in ("id", "record_id"):
+                candidate = item.get(key)
+                if isinstance(candidate, str) and candidate:
+                    return [candidate]
+            return []
+
         if isinstance(val, list):
             ids = []
             for item in val:
-                if isinstance(item, dict):
-                    # Each item has record_ids (plural) key
-                    item_ids = item.get("record_ids", [])
-                    ids.extend(item_ids)
-                elif isinstance(item, str):
-                    ids.append(item)
-            return [i for i in ids if i]
-        if isinstance(val, dict):
-            return val.get("record_ids", [])
-        return []
+                ids.extend(_extract_ids(item))
+            return ids
+        return _extract_ids(val)
 
     def get_number(self, record: dict, field: str, default: float = 0) -> float:
         """Extract a numeric field value."""

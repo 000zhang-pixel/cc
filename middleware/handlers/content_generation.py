@@ -43,6 +43,9 @@ _MODEL_NAME_MAP = {
     "GPT-4.1":          "gpt-4.1",
     "Kimi K2.5":        "kimi-k2.5",
     "DeepSeek":         "deepseek",
+    "GPT image 2":      "gpt-image-2",
+    "GPT Image 2":      "gpt-image-2",
+    "gpt-image-2":      "gpt-image-2",
     "Nanobanana 2":     "nanobanana-2",
     # Legacy Xiaole display names are remapped to the approved Nanobanana relay.
     # Direct Xiaole proxy providers remain blocked in build_image_adapter() so
@@ -239,6 +242,7 @@ class ContentGenerationHandler:
 
         # --- 10. Update plan status ---
         completion_time = int(datetime.now().timestamp() * 1000)
+        logger.info("Plan completion update start: plan_record_id=%s content_record_count=%d", record_id, len(content_record_ids))
         f.update_record(table_plan, record_id, {
             "执行状态": "完成",
             "任务完成时间": completion_time,
@@ -247,6 +251,7 @@ class ContentGenerationHandler:
                 f"共生成 {len(content_record_ids)} 条内容记录"
             ),
         })
+        logger.info("Plan completion update done: plan_record_id=%s", record_id)
         db.mark_plan_done(plan_code)
         db.log_task("plan", 0, "INFO",
                     f"ContentGeneration complete: {len(content_record_ids)} content records",
@@ -1508,6 +1513,31 @@ class ContentGenerationHandler:
         self, strategy: dict | None, sku_fields: dict, scene: dict,
         persona: dict | None = None, brief: dict | None = None,
     ) -> str:
+        return self._build_model_aware_image_master_prompt(
+            "nanobanana-2", strategy, sku_fields, scene, persona=persona, brief=brief
+        )
+
+    def _build_model_aware_image_master_prompt(
+        self,
+        image_model_name: str,
+        strategy: dict | None,
+        sku_fields: dict,
+        scene: dict,
+        persona: dict | None = None,
+        brief: dict | None = None,
+    ) -> str:
+        if image_model_name == "gpt-image-2":
+            return self._build_gpt_image2_master_prompt(
+                strategy, sku_fields, scene, persona=persona, brief=brief
+            )
+        return self._build_nanobanana_master_prompt(
+            strategy, sku_fields, scene, persona=persona, brief=brief
+        )
+
+    def _build_nanobanana_master_prompt(
+        self, strategy: dict | None, sku_fields: dict, scene: dict,
+        persona: dict | None = None, brief: dict | None = None,
+    ) -> str:
         """Build the master context prompt in Chinese for image generation.
 
         Length budget: target ≤600 chars so combined (master + sub) stays ≤800.
@@ -1640,6 +1670,42 @@ class ContentGenerationHandler:
         if scene_zh and len(scene_zh) > 60:
             core_parts[3] = f"【场景】{scene_zh[:60]}"
         return _join([core_parts, person_part, consistency_part])
+
+    def _build_gpt_image2_master_prompt(
+        self, strategy: dict | None, sku_fields: dict, scene: dict,
+        persona: dict | None = None, brief: dict | None = None,
+    ) -> str:
+        f = self._feishu
+        rec = {"fields": sku_fields}
+        name = f.get_text(rec, "产品简称") or f.get_text(rec, "SKU名称")
+        colors = "、".join(f.get_options(rec, "颜色"))
+        materials = "、".join(f.get_options(rec, "材质"))
+        styles = "、".join(f.get_options(rec, "风格"))
+        scene_zh = scene.get("场景描述_中文", "").strip()
+        style_words = scene.get("风格基调词", "").strip()
+        props_hint = scene.get("道具建议", "").strip()
+        exclude = scene.get("排除描述", "").strip()
+        person_type = scene.get("人物类型", "").strip()
+        no_person_scene = self._is_no_person_scene(person_type)
+
+        parts = [
+            f"参考图任务：白底图即商品参考图，必须严格保留同一产品主体。",
+            f"产品：{name}。颜色：{colors or '如参考图'}。材质：{materials or '如参考图'}。风格：{styles or '如参考图'}。",
+            f"场景：{scene_zh or '电商棚拍场景'}。",
+        ]
+        if style_words:
+            parts.append(f"画面风格：{style_words}。")
+        if props_hint:
+            parts.append(f"道具可用：{props_hint}。")
+        if no_person_scene:
+            parts.append("生成纯产品画面，不要人物，不要手部，不要第二主体。")
+        else:
+            parts.append("若出现人物，人物只作为陪体，商品必须始终是唯一主角。")
+        parts.append("必须保持与参考图一致的产品款式、颜色、材质、图案、结构、挂接方式和关键细节，不要改造商品本体。")
+        if exclude:
+            parts.append(f"避免：{exclude}。")
+        parts.append("输出适合9:16电商封面的单张高完成度画面，构图简洁，主体明确，商品优先。")
+        return "\n".join(parts)
 
     def _build_image_sub_prompts(
         self, shotplan: dict | None, scene: dict, img_count: int,
@@ -1841,8 +1907,8 @@ class ContentGenerationHandler:
                             # Update brief with resolved shotplan_id for observability
                     if brief and shotplan:
                         brief["shotplan_id"] = self._feishu.get_text(shotplan, "方案编号") or shotplan.get("record_id", "")
-                    master = self._build_image_master_prompt(
-                        strategy, sku_fields, scene, persona=persona, brief=brief
+                    master = self._build_model_aware_image_master_prompt(
+                        cfg["image_model_name"], strategy, sku_fields, scene, persona=persona, brief=brief
                     )
                     subs = self._build_image_sub_prompts(
                         shotplan, scene, img_count, persona=persona, brief=brief
@@ -2072,6 +2138,11 @@ class ContentGenerationHandler:
                         content_code, existing_gen_status,
                     )
                     f.update_record(table_content, content_record_id, {"生成状态": "生成中", "失败原因": ""})
+                    db.update_content_status(
+                        content_code,
+                        gen_status="生成中",
+                        error_msg=None,
+                    )
                 created_new = False
             else:
                 content_fields: dict = {
@@ -2149,7 +2220,12 @@ class ContentGenerationHandler:
             content_record_id = runtime["content_record_id"]
             is_img = runtime["is_img"]
             current_prompt_fingerprint = runtime.get("current_prompt_fingerprint", "")
+            logger.info(
+                "Phase B start: gid=%s content_code=%s record_id=%s is_img=%s skip_generation=%s task_type=%s",
+                gid, content_code, content_record_id, is_img, runtime["skip_generation"], task_type,
+            )
             if runtime["skip_generation"]:
+                logger.info("Phase B skip_generation=true: gid=%s content_code=%s", gid, content_code)
                 continue
 
             # Get text prompt
@@ -2178,6 +2254,7 @@ class ContentGenerationHandler:
             if task_type in ("AI全创作", "图片实拍+AI文案", "视频实拍+AI文案"):
                 # --- Generate text (title + body + tags) ---
                 try:
+                    logger.info("Text generation start: gid=%s content_code=%s", gid, content_code)
                     text_adapter = build_text_adapter(cfg["text_model_name"], self._model_params)
                     _BASE_SYSTEM = (
                         "你是专业的电商种草文案撰写者，深谙得物、小红书、抖音等平台的爆款内容规律。\n"
@@ -2202,6 +2279,10 @@ class ContentGenerationHandler:
                         )
                     text_result = text_adapter.complete(system_for_generation, c_prompt_text)
                     title, body, _ = self._parse_text_result(text_result)
+                    logger.info(
+                        "Text generation done: gid=%s content_code=%s title_len=%d body_len=%d",
+                        gid, content_code, len(title or ""), len(body or ""),
+                    )
                     prior_titles.append(title)  # track for subsequent groups
                     tags_text = " ".join(tags) if tags else ""
                     update["标题"] = title
@@ -2235,18 +2316,21 @@ class ContentGenerationHandler:
                             logger.warning("LocalStorage update_text/debug failed for %s", gid, exc_info=True)
                     # Write text to Feishu immediately (don't wait for images)
                     try:
+                        logger.info("Text Feishu update start: gid=%s content_code=%s", gid, content_code)
                         f.update_record(table_content, content_record_id, {
                             "标题": title, "正文": body, "标签": tags_text,
                         })
                         logger.info("Text written to Feishu for %s", gid)
                     except Exception:
                         logger.warning("Failed to write text to Feishu for %s", gid, exc_info=True)
-                except Exception as exc:
-                    fail_reason = f"文案生成失败: {exc}"
+                except BaseException as exc:
+                    logger.exception("Text generation failed: gid=%s content_code=%s exc_type=%s", gid, content_code, type(exc).__name__)
+                    fail_reason = f"文案生成失败: {exc}" if str(exc) else f"文案生成失败: {type(exc).__name__}"
 
             if task_type == "AI全创作" and not fail_reason:
                 if is_img:
                     # --- Generate images ---
+                    logger.info("Image generation phase start: gid=%s content_code=%s", gid, content_code)
                     sub_prompts_json = f.get_text(i_prompt_rec, "子Prompt列表") if i_prompt_rec else "[]"
                     try:
                         sub_prompts = json.loads(sub_prompts_json) if sub_prompts_json.strip() else []
@@ -2314,11 +2398,9 @@ class ContentGenerationHandler:
                         try:
                             # Always combine master prompt + sub-prompt so consistency
                             # constraints and person description reach every image call
-                            if is_nanobanana:
-                                img_bytes = img_adapter.generate(combined, ref_images=ref_images or None)
-                            else:
-                                img_bytes = img_adapter.generate(combined)
+                            img_bytes = img_adapter.generate(combined, ref_images=ref_images or None)
                             logger.info("Image %d/%d generated (%d bytes) for %s", idx+1, img_count, len(img_bytes), gid)
+                            logger.info("Image upload start: gid=%s content_code=%s index=%d", gid, content_code, idx+1)
                             token = self._upload_attachment(
                                 table_content, content_record_id,
                                 f"{content_code}_img{idx+1:02d}.jpg", img_bytes
@@ -2354,6 +2436,10 @@ class ContentGenerationHandler:
                             fail_reason = f"图片上传飞书失败（{img_count}张已生成，但未能上传）"
                     elif not fail_reason and failed_count > 0:
                         fail_reason = f"部分图片失败：{failed_count}/{img_count} 张未生成或上传"
+                    logger.info(
+                        "Image generation phase end: gid=%s content_code=%s attachments=%d failed_count=%d fail_reason=%r",
+                        gid, content_code, len(attachment_tokens), failed_count, fail_reason,
+                    )
 
                     # P1-4: Write image_prompts + image_failures to content.json debug block
                     if self._storage and (_image_prompts or _image_failures):
@@ -2408,6 +2494,14 @@ class ContentGenerationHandler:
                 update["失败原因"] = fail_reason
             else:
                 update["生成状态"] = "已生成"
+            logger.info(
+                "Content record final update prepared: gid=%s content_code=%s gen_status=%s fail_reason=%r update_keys=%s",
+                gid,
+                content_code,
+                update.get("生成状态"),
+                fail_reason,
+                sorted(update.keys()),
+            )
 
             # Write observability fields to 表4 (best-effort, non-blocking)
             brief = briefs.get(gid, {})
@@ -2442,11 +2536,15 @@ class ContentGenerationHandler:
                 except Exception:
                     logger.debug("Failed to build observability fields for 表4, group=%s", gid, exc_info=True)
 
+            logger.info("Content record Feishu update start: gid=%s content_code=%s", gid, content_code)
             f.update_record(table_content, content_record_id, update)
+            logger.info("Content record Feishu update done: gid=%s content_code=%s", gid, content_code)
             db.update_content_status(
                 content_code,
                 gen_status="生成失败" if fail_reason else "已生成",
+                error_msg=fail_reason if fail_reason else None,
             )
+            logger.info("DB content status updated: gid=%s content_code=%s", gid, content_code)
 
             # Mark prompts as 已使用
             for pr in [c_pr, i_pr]:
@@ -2455,6 +2553,7 @@ class ContentGenerationHandler:
                         f.update_record(table_prompt, pr["prompt_record_id"], {"状态": "已使用"})
                     except Exception:
                         pass
+            logger.info("Phase B done: gid=%s content_code=%s", gid, content_code)
 
         return content_record_ids
 

@@ -160,8 +160,16 @@ def main():
     for sig in stop_signals:
         signal.signal(sig, _shutdown)
 
-    # Block main thread
-    signal.pause() if hasattr(signal, "pause") else _windows_wait(poller, dispatcher)
+    # Block main thread. signal.pause() returns after *any* handled signal;
+    # keep waiting unless our shutdown handler sets the stop event.
+    if hasattr(signal, "pause"):
+        while True:
+            signal.pause()
+            if poller._stop_event.is_set() or dispatcher._stop_event.is_set():
+                break
+            logger.warning("signal.pause() returned without shutdown request; continuing to wait")
+    else:
+        _windows_wait(poller, dispatcher)
 
 
 def _windows_wait(poller, dispatcher):

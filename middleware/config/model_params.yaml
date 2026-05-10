@@ -27,6 +27,12 @@ image_model:
   retry_max: 3
   retry_base_seconds: 1
   providers:
+    gpt-image-2:
+      api_key: ${YAPS_API_KEY}
+      base_url: https://api.yaps.cn/v1
+      model: gpt-5.5
+      image_model: gpt-image-2
+      size: "1024x1536"
     nanobanana-2:
       api_key: ${NANOBANANA_API_KEY}
       base_url: ${NANOBANANA_BASE_URL}

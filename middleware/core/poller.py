@@ -40,6 +40,10 @@ class Poller:
         self._stop_event = threading.Event()
         # In-memory dedup for tasks that have no lockable status field
         self._queued_reviews: set[str] = set()
+        # In-memory guard for long-running plan generation tasks. Feishu reads can
+        # briefly lag after we lock a plan to 执行中, so prevent the same plan from
+        # being queued again within the same middleware process.
+        self._queued_plans: set[str] = set()
 
     def start(self):
         t = threading.Thread(target=self._run, daemon=True, name="Poller")
@@ -82,12 +86,19 @@ class Poller:
             f = self._feishu
             trigger = f.get_option(rec, "确认执行")
             status  = f.get_option(rec, "执行状态")
+            record_id = rec["record_id"]
+
             if trigger not in self._PLAN_TRIGGER_VALUES:
+                self._queued_plans.discard(record_id)
                 continue
             if status in self._PLAN_SKIP_STATUSES:
+                if status in {"完成", "失败"}:
+                    self._queued_plans.discard(record_id)
+                continue
+            if record_id in self._queued_plans:
+                logger.info("[Poller] Skip duplicate in-flight plan record %s", record_id)
                 continue
 
-            record_id = rec["record_id"]
             # Anti-duplication: immediately mark as 执行中
             try:
                 f.update_record(table_id, record_id, {"执行状态": "执行中"})
@@ -95,6 +106,7 @@ class Poller:
                 logger.exception("Failed to lock plan record %s", record_id)
                 continue
 
+            self._queued_plans.add(record_id)
             self._queue.put(Task(
                 task_type=TASK_CONTENT_GENERATION,
                 table_id=table_id,

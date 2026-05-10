@@ -31,3 +31,23 @@ def test_prompt_policy_factory_can_route_from_explicit_capability_override():
         capability={'prompt_policy': 'reference_first'},
     )
     assert isinstance(policy, ReferenceFirstPolicy)
+
+
+def test_prompt_policy_factory_can_route_from_model_params_capability():
+    policy = get_image_prompt_policy(
+        'some-future-model',
+        model_params={
+            'image_model': {
+                'providers': {
+                    'some-future-model': {
+                        'capability': {
+                            'prompt_policy': 'reference_first',
+                            'sub_prompt_identity_lock': False,
+                            'primary_reference_mode': 'reference_image',
+                        }
+                    }
+                }
+            }
+        },
+    )
+    assert isinstance(policy, ReferenceFirstPolicy)

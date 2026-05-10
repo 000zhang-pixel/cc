@@ -115,7 +115,7 @@ def _make_handler(feishu):
     )
 
 
-def _run_generate_content(monkeypatch, image_model_name, image_adapter, sku_attachments):
+def _run_generate_content(monkeypatch, image_model_name, image_adapter, sku_attachments, model_params=None):
     from handlers import content_generation as module
 
     monkeypatch.setattr(module, "build_text_adapter", lambda *args, **kwargs: _FakeTextAdapter())
@@ -125,6 +125,7 @@ def _run_generate_content(monkeypatch, image_model_name, image_adapter, sku_atta
 
     feishu = _FakeFeishu(sku_attachments)
     handler = _make_handler(feishu)
+    handler._model_params = model_params or {}
     groups = [{"group_id": "G1", "type": "img", "content_type": "种草推荐", "img_per_piece": 2}]
     prompt_records = [
         {"group": groups[0], "suffix": "C", "prompt_record_id": "prompt-c"},
@@ -166,7 +167,61 @@ def test_generate_content_passes_reference_image_to_gpt_image2_when_white_bg_exi
 
 
 
-def test_generate_content_passes_all_white_bg_images_to_dual_image_model(monkeypatch):
+def test_generate_content_passes_all_white_bg_images_to_reference_image_mode_model(monkeypatch):
+    feishu, adapter = _run_generate_content(
+        monkeypatch,
+        image_model_name="some-reference-model",
+        image_adapter=_SequentialImageAdapter(),
+        sku_attachments=[{"file_token": "ft-1"}, {"file_token": "ft-2"}],
+        model_params={
+            "image_model": {
+                "providers": {
+                    "some-reference-model": {
+                        "capability": {
+                            "prompt_policy": "reference_first",
+                            "sub_prompt_identity_lock": False,
+                            "primary_reference_mode": "reference_image",
+                        }
+                    }
+                }
+            }
+        },
+    )
+
+    assert feishu.downloaded_tokens == ["ft-1", "ft-2"]
+    assert len(adapter.calls) == 2
+    assert adapter.calls[0]["ref_images"] == [b"bytes-for-ft-1", b"bytes-for-ft-2"]
+    assert adapter.calls[1]["ref_images"] == [b"bytes-for-ft-1", b"bytes-for-ft-2"]
+
+
+def test_generate_content_skips_white_bg_reference_download_for_identity_anchor_mode(monkeypatch):
+    feishu, adapter = _run_generate_content(
+        monkeypatch,
+        image_model_name="some-future-model",
+        image_adapter=_SequentialImageAdapter(),
+        sku_attachments=[{"file_token": "ft-1"}, {"file_token": "ft-2"}],
+        model_params={
+            "image_model": {
+                "providers": {
+                    "some-future-model": {
+                        "capability": {
+                            "prompt_policy": "identity_first",
+                            "sub_prompt_identity_lock": True,
+                            "primary_reference_mode": "identity_anchor",
+                        }
+                    }
+                }
+            }
+        },
+    )
+
+    assert feishu.downloaded_tokens == []
+    assert len(adapter.calls) == 2
+    assert adapter.calls[0]["ref_images"] == []
+    assert adapter.calls[1]["ref_images"] == []
+
+
+def test_generate_content_skips_white_bg_reference_download_for_nanobanana_identity_anchor_mode(monkeypatch):
     feishu, adapter = _run_generate_content(
         monkeypatch,
         image_model_name="nanobanana-2",
@@ -174,7 +229,7 @@ def test_generate_content_passes_all_white_bg_images_to_dual_image_model(monkeyp
         sku_attachments=[{"file_token": "ft-1"}, {"file_token": "ft-2"}],
     )
 
-    assert feishu.downloaded_tokens == ["ft-1", "ft-2"]
+    assert feishu.downloaded_tokens == []
     assert len(adapter.calls) == 2
-    assert adapter.calls[0]["ref_images"] == [b"bytes-for-ft-1", b"bytes-for-ft-2"]
-    assert adapter.calls[1]["ref_images"] == [b"bytes-for-ft-1", b"bytes-for-ft-2"]
+    assert adapter.calls[0]["ref_images"] == []
+    assert adapter.calls[1]["ref_images"] == []

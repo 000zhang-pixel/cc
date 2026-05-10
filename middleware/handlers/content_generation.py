@@ -35,6 +35,7 @@ from adapters.ai_models import (
 from core.local_storage import LocalStorage
 from core.task import Task
 from prompt_policies.factory import get_image_prompt_policy
+from prompt_policies.registry import get_image_model_capability
 
 logger = logging.getLogger(__name__)
 
@@ -1527,7 +1528,11 @@ class ContentGenerationHandler:
         persona: dict | None = None,
         brief: dict | None = None,
     ) -> str:
-        policy = get_image_prompt_policy(image_model_name, handler=self)
+        policy = get_image_prompt_policy(
+            image_model_name,
+            handler=self,
+            model_params=self._model_params or None,
+        )
         return policy.build_master_prompt(
             strategy, sku_fields, scene, persona=persona, brief=brief
         )
@@ -1714,7 +1719,11 @@ class ContentGenerationHandler:
         persona: dict | None = None,
         brief: dict | None = None,
     ) -> list[str]:
-        policy = get_image_prompt_policy(image_model_name, handler=self)
+        policy = get_image_prompt_policy(
+            image_model_name,
+            handler=self,
+            model_params=self._model_params or None,
+        )
         return policy.build_sub_prompts(
             shotplan, scene, img_count, persona=persona, brief=brief
         )
@@ -2367,8 +2376,13 @@ class ContentGenerationHandler:
 
                     # Fetch all 白底图 attachments as reference images for image models that accept ref_images.
                     ref_images: list[bytes] = []
+                    image_capability = get_image_model_capability(
+                        cfg["image_model_name"],
+                        model_params=self._model_params or None,
+                    )
+                    primary_reference_mode = image_capability.get("primary_reference_mode")
                     bai_di_attachments = sku_fields.get("白底图") or []
-                    if bai_di_attachments:
+                    if primary_reference_mode == "reference_image" and bai_di_attachments:
                         for attachment in bai_di_attachments:
                             file_token = attachment.get("file_token") if isinstance(attachment, dict) else None
                             if not file_token:

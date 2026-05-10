@@ -44,6 +44,27 @@ class TestImageModelPolicyContract:
             '道具建议': '杂志、咖啡杯、首饰托盘',
         }
 
+    def test_handler_model_aware_prompt_can_route_from_model_params_capability(self):
+        self.handler._model_params = {
+            'image_model': {
+                'providers': {
+                    'some-future-model': {
+                        'capability': {
+                            'prompt_policy': 'reference_first',
+                            'sub_prompt_identity_lock': False,
+                            'primary_reference_mode': 'reference_image',
+                        }
+                    }
+                }
+            }
+        }
+
+        prompt = self.handler._build_model_aware_image_master_prompt(
+            'some-future-model', self.strategy, self.sku_fields, self.scene, persona=None, brief=None
+        )
+
+        assert '参考图任务：白底图即商品参考图' in prompt
+
     def test_model_aware_master_prompt_contract_keeps_current_renderer_split(self):
         gpt_prompt = self.handler._build_model_aware_image_master_prompt(
             'gpt-image-2', self.strategy, self.sku_fields, self.scene, persona=None, brief=None

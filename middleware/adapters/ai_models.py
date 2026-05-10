@@ -794,10 +794,10 @@ def build_image_adapter(model_params: dict, provider_name: str = None):
         return VolcEngineImageAdapter(provider_cfg, cfg_root)
     if provider_cfg.get("endpoint"):
         effective_base_url = str(provider_cfg.get("base_url", "https://api.xiaoleai.team")).strip()
-        if "xiaoleai.team" in effective_base_url.lower():
+        if "xiaoleai.team" in effective_base_url.lower() and provider_name != "nanobanana-2":
             raise ValueError(
                 f"Image model provider {provider_name!r} uses deprecated Xiaole proxy {effective_base_url!r}; "
-                "switch the plan to 'Nanobanana 2' (runapi relay) before generation"
+                "switch the plan to 'Nanobanana 2' before generation"
             )
         return XiaoleImageAdapter(provider_cfg, cfg_root)
     return ImageModelAdapter(provider_cfg, cfg_root)

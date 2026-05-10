@@ -1,6 +1,6 @@
 """
 reset_plan.py — Reset a plan record in Feishu for re-triggering.
-Usage: python reset_plan.py <record_id> [--image-model volcengine-seedream]
+Usage: python reset_plan.py <record_id> [--image-model gpt-image-2]
 
 Resets 执行状态 to empty and optionally updates 图片模型.
 """

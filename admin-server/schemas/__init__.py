@@ -139,7 +139,7 @@ class CreatePlanRequest(BaseModel):
     video_max_sec: int = 12
     tag_inject_n: int = 5
     text_model: str = "kimi-k2.5"
-    image_model: str = "volcengine-seedream"
+    image_model: str = "gpt-image-2"
     video_model: str = "volcengine-seedance"
     notes: str = ""
 

@@ -34,6 +34,7 @@ from adapters.ai_models import (
 )
 from core.local_storage import LocalStorage
 from core.task import Task
+from prompt_policies.factory import get_image_prompt_policy
 
 logger = logging.getLogger(__name__)
 
@@ -335,7 +336,7 @@ class ContentGenerationHandler:
             "vid_max_sec": int(f.get_number(dummy, "视频最长时长(秒)", 12)),
             "tag_count": int(f.get_number(dummy, "注入标签数(N)", 5)),
             "text_model_name":  _normalize_model(f.get_option(dummy, "文案模型",  "kimi-k2.5")),
-            "image_model_name": _normalize_model(f.get_option(dummy, "图片模型",  "volcengine-seedream")),
+            "image_model_name": _normalize_model(f.get_option(dummy, "图片模型",  "gpt-image-2")),
             "video_model_name": _normalize_model(f.get_option(dummy, "视频模型",  "volcengine-seedance")),
             # v2 新增可选控制字段 — 飞书表中若未建立这些字段会返回空值，均有安全默认值
             "diff_strength":   f.get_option(dummy, "差异化强度")  or "中",   # 低/中/高
@@ -1526,11 +1527,8 @@ class ContentGenerationHandler:
         persona: dict | None = None,
         brief: dict | None = None,
     ) -> str:
-        if image_model_name == "gpt-image-2":
-            return self._build_gpt_image2_master_prompt(
-                strategy, sku_fields, scene, persona=persona, brief=brief
-            )
-        return self._build_nanobanana_master_prompt(
+        policy = get_image_prompt_policy(image_model_name, handler=self)
+        return policy.build_master_prompt(
             strategy, sku_fields, scene, persona=persona, brief=brief
         )
 
@@ -1706,6 +1704,20 @@ class ContentGenerationHandler:
             parts.append(f"避免：{exclude}。")
         parts.append("输出适合9:16电商封面的单张高完成度画面，构图简洁，主体明确，商品优先。")
         return "\n".join(parts)
+
+    def _build_model_aware_image_sub_prompts(
+        self,
+        image_model_name: str,
+        shotplan: dict | None,
+        scene: dict,
+        img_count: int,
+        persona: dict | None = None,
+        brief: dict | None = None,
+    ) -> list[str]:
+        policy = get_image_prompt_policy(image_model_name, handler=self)
+        return policy.build_sub_prompts(
+            shotplan, scene, img_count, persona=persona, brief=brief
+        )
 
     def _build_image_sub_prompts(
         self, shotplan: dict | None, scene: dict, img_count: int,
@@ -1910,8 +1922,8 @@ class ContentGenerationHandler:
                     master = self._build_model_aware_image_master_prompt(
                         cfg["image_model_name"], strategy, sku_fields, scene, persona=persona, brief=brief
                     )
-                    subs = self._build_image_sub_prompts(
-                        shotplan, scene, img_count, persona=persona, brief=brief
+                    subs = self._build_model_aware_image_sub_prompts(
+                        cfg["image_model_name"], shotplan, scene, img_count, persona=persona, brief=brief
                     )
                     fingerprint_payload = self._build_prompt_fingerprint_payload(
                         gid,

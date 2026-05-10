@@ -34,11 +34,11 @@ image_model:
       image_model: gpt-image-2
       size: "1024x1536"
     nanobanana-2:
-      api_key: ${NANOBANANA_API_KEY}
-      base_url: ${NANOBANANA_BASE_URL}
+      api_key: ${XIAOLE_API_KEY}
+      base_url: ${XIAOLE_BASE_URL}
+      endpoint: ${XIAOLE_IMAGE_ENDPOINT}
       model: gemini-3.1-flash-image-preview
       aspect_ratio: "9:16"
-      image_size: "1K"
     gemini-3.1-flash-image-preview:
       api_key: ${XIAOLE_API_KEY}
       base_url: ${XIAOLE_BASE_URL}

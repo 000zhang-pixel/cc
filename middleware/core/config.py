@@ -2,6 +2,7 @@
 Config loader — reads system.yaml and model_params.yaml,
 expanding ${ENV_VAR} references from environment / .env file.
 """
+import logging
 import os
 import re
 import yaml
@@ -31,6 +32,18 @@ def _load(path: Path) -> dict:
 
 
 _CONFIG_DIR = Path(__file__).parent.parent / "config"
+logger = logging.getLogger(__name__)
+
+
+def _warn_invalid_image_model_capabilities(model_params: dict) -> None:
+    from prompt_policies.registry import validate_image_model_capability
+
+    providers = ((model_params or {}).get("image_model") or {}).get("providers") or {}
+    for model_name, provider_cfg in providers.items():
+        if not isinstance(provider_cfg, dict):
+            continue
+        for error in validate_image_model_capability(model_name, provider_cfg.get("capability")):
+            logger.warning(error)
 
 
 def load_system() -> dict:
@@ -38,4 +51,6 @@ def load_system() -> dict:
 
 
 def load_model_params() -> dict:
-    return _load(_CONFIG_DIR / "model_params.yaml")
+    model_params = _load(_CONFIG_DIR / "model_params.yaml")
+    _warn_invalid_image_model_capabilities(model_params)
+    return model_params

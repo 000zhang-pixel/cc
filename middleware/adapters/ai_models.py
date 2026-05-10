@@ -18,6 +18,8 @@ from abc import ABC, abstractmethod
 import httpx
 from openai import OpenAI
 
+from prompt_policies.registry import get_image_model_capability
+
 logger = logging.getLogger(__name__)
 
 
@@ -223,6 +225,7 @@ class ImageModelAdapter:
         self._model    = cfg.get("model", "gemini-3.1-flash-image-preview")
         self._aspect_ratio = cfg.get("aspect_ratio", "9:16")
         self._image_size   = cfg.get("image_size", "1K")
+        self._reference_input_mode = cfg.get("reference_input_mode", "inline_data")
         self._semaphore = _get_semaphore("image", shared_cfg["max_concurrency"])
         self._retry_max = shared_cfg["retry_max"]
         self._retry_base = shared_cfg["retry_base_seconds"]
@@ -255,14 +258,15 @@ class ImageModelAdapter:
         """
         url = self._generate_url()
         parts = []
-        for img_bytes in (ref_images or []):
-            mime = self._detect_mime(img_bytes)
-            parts.append({
-                "inlineData": {
-                    "mimeType": mime,
-                    "data": base64.b64encode(img_bytes).decode("utf-8"),
-                }
-            })
+        if self._reference_input_mode == "inline_data":
+            for img_bytes in (ref_images or []):
+                mime = self._detect_mime(img_bytes)
+                parts.append({
+                    "inlineData": {
+                        "mimeType": mime,
+                        "data": base64.b64encode(img_bytes).decode("utf-8"),
+                    }
+                })
         parts.append({"text": prompt})
 
         payload = {
@@ -337,6 +341,7 @@ class XiaoleImageAdapter:
         self._endpoint = cfg.get("endpoint", "/v1/image/created")
         self._model = cfg.get("model", "gemini-3.1-flash-image-preview")
         self._aspect_ratio = cfg.get("aspect_ratio", "9:16")
+        self._reference_input_mode = cfg.get("reference_input_mode", "reference_images")
         self._semaphore = _get_semaphore("image", shared_cfg["max_concurrency"])
         self._retry_max = shared_cfg["retry_max"]
         self._retry_base = shared_cfg["retry_base_seconds"]
@@ -356,7 +361,7 @@ class XiaoleImageAdapter:
             "aspect_ratio": self._aspect_ratio,
             "n": 1,
         }
-        if ref_images:
+        if ref_images and self._reference_input_mode == "reference_images":
             payload["reference_images"] = [
                 {
                     "mime_type": ImageModelAdapter._detect_mime(img_bytes),
@@ -454,6 +459,7 @@ class OpenAIImageAdapter:
         self._model = cfg["model"]
         self._image_model = cfg.get("image_model")
         self._size = cfg.get("size", "1024x1024")
+        self._reference_input_mode = cfg.get("reference_input_mode", "input_image")
         self._stream_timeout_seconds = int(cfg.get("stream_timeout_seconds", 240))
         self._semaphore = _get_semaphore("image", shared_cfg["max_concurrency"])
         self._retry_max = shared_cfg["retry_max"]
@@ -529,10 +535,11 @@ class OpenAIImageAdapter:
             with self._semaphore:
                 if self._image_model:
                     content = [{"type": "input_text", "text": prompt}]
-                    for img_bytes in (ref_images or []):
-                        mime = ImageModelAdapter._detect_mime(img_bytes)
-                        data_url = f"data:{mime};base64,{base64.b64encode(img_bytes).decode('utf-8')}"
-                        content.append({"type": "input_image", "image_url": data_url})
+                    if self._reference_input_mode == "input_image":
+                        for img_bytes in (ref_images or []):
+                            mime = ImageModelAdapter._detect_mime(img_bytes)
+                            data_url = f"data:{mime};base64,{base64.b64encode(img_bytes).decode('utf-8')}"
+                            content.append({"type": "input_image", "image_url": data_url})
                     try:
                         logger.info(
                             "OpenAIImageAdapter generate start: model=%s image_model=%s prompt_len=%d ref_images=%d",
@@ -788,19 +795,29 @@ def build_image_adapter(model_params: dict, provider_name: str = None):
         raise ValueError(
             f"Image model provider {provider_name!r} is not configured with a valid api_key"
         )
-    if provider_name == "gpt-image-2":
-        return OpenAIImageAdapter(provider_cfg, cfg_root)
-    if "volcengine" in provider_name:
-        return VolcEngineImageAdapter(provider_cfg, cfg_root)
-    if provider_cfg.get("endpoint"):
+    capability = get_image_model_capability(provider_name, model_params=model_params)
+    adapter_family = capability.get("adapter_family")
+    effective_cfg = dict(provider_cfg)
+    generation_size = provider_cfg.get("generation_size")
+    generation_size_key = capability.get("generation_size_key")
+    reference_input_mode = capability.get("reference_input_mode")
+    if reference_input_mode:
+        effective_cfg["reference_input_mode"] = reference_input_mode
+    if generation_size and generation_size_key:
+        effective_cfg[generation_size_key] = generation_size
+    if provider_name == "gpt-image-2" or adapter_family == "openai":
+        return OpenAIImageAdapter(effective_cfg, cfg_root)
+    if "volcengine" in provider_name or adapter_family == "volcengine":
+        return VolcEngineImageAdapter(effective_cfg, cfg_root)
+    if provider_cfg.get("endpoint") or adapter_family == "xiaole":
         effective_base_url = str(provider_cfg.get("base_url", "https://api.xiaoleai.team")).strip()
-        if "xiaoleai.team" in effective_base_url.lower() and provider_name != "nanobanana-2":
+        if provider_cfg.get("endpoint") and "xiaoleai.team" in effective_base_url.lower() and provider_name != "nanobanana-2":
             raise ValueError(
                 f"Image model provider {provider_name!r} uses deprecated Xiaole proxy {effective_base_url!r}; "
                 "switch the plan to 'Nanobanana 2' before generation"
             )
-        return XiaoleImageAdapter(provider_cfg, cfg_root)
-    return ImageModelAdapter(provider_cfg, cfg_root)
+        return XiaoleImageAdapter(effective_cfg, cfg_root)
+    return ImageModelAdapter(effective_cfg, cfg_root)
 
 
 def build_video_adapter(model_params: dict, provider_name: str = None):

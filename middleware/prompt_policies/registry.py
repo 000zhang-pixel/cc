@@ -5,6 +5,9 @@ REQUIRED_IMAGE_MODEL_CAPABILITY_KEYS = frozenset({
     'prompt_policy',
     'sub_prompt_identity_lock',
     'primary_reference_mode',
+    'adapter_family',
+    'reference_input_mode',
+    'generation_size_key',
 })
 
 
@@ -12,6 +15,9 @@ DEFAULT_IMAGE_MODEL_CAPABILITY = {
     'prompt_policy': 'identity_first',
     'sub_prompt_identity_lock': True,
     'primary_reference_mode': 'identity_anchor',
+    'adapter_family': 'generic',
+    'reference_input_mode': 'inline_data',
+    'generation_size_key': 'image_size',
 }
 
 

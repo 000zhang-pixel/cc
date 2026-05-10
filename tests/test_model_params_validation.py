@@ -29,7 +29,7 @@ def test_load_model_params_warns_when_image_model_capability_is_incomplete(tmp_p
         loaded = config.load_model_params()
 
     assert loaded['image_model']['providers']['broken-model']['capability']['prompt_policy'] == 'reference_first'
-    assert "broken-model missing capability keys: ['primary_reference_mode', 'sub_prompt_identity_lock']" in caplog.text
+    assert "broken-model missing capability keys: ['adapter_family', 'generation_size_key', 'primary_reference_mode', 'reference_input_mode', 'sub_prompt_identity_lock']" in caplog.text
 
 
 
@@ -68,6 +68,9 @@ def test_load_model_params_does_not_warn_for_complete_image_model_capability(tmp
             '        prompt_policy: reference_first',
             '        sub_prompt_identity_lock: false',
             '        primary_reference_mode: reference_image',
+            '        adapter_family: openai',
+            '        reference_input_mode: input_image',
+            '        generation_size_key: size',
         ]),
         encoding='utf-8',
     )

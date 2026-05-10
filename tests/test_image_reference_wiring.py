@@ -181,6 +181,9 @@ def test_generate_content_passes_all_white_bg_images_to_reference_image_mode_mod
                             "prompt_policy": "reference_first",
                             "sub_prompt_identity_lock": False,
                             "primary_reference_mode": "reference_image",
+                            "adapter_family": "openai",
+                            "reference_input_mode": "input_image",
+                            "generation_size_key": "size",
                         }
                     }
                 }
@@ -208,6 +211,9 @@ def test_generate_content_skips_white_bg_reference_download_for_identity_anchor_
                             "prompt_policy": "identity_first",
                             "sub_prompt_identity_lock": True,
                             "primary_reference_mode": "identity_anchor",
+                            "adapter_family": "xiaole",
+                            "reference_input_mode": "reference_images",
+                            "generation_size_key": "aspect_ratio",
                         }
                     }
                 }

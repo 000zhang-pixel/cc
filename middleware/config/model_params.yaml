@@ -37,6 +37,9 @@ image_model:
         prompt_policy: reference_first
         sub_prompt_identity_lock: false
         primary_reference_mode: reference_image
+        adapter_family: openai
+        reference_input_mode: input_image
+        generation_size_key: size
     nanobanana-2:
       api_key: ${XIAOLE_API_KEY}
       base_url: ${XIAOLE_BASE_URL}
@@ -47,6 +50,9 @@ image_model:
         prompt_policy: identity_first
         sub_prompt_identity_lock: true
         primary_reference_mode: identity_anchor
+        adapter_family: xiaole
+        reference_input_mode: reference_images
+        generation_size_key: aspect_ratio
     gemini-3.1-flash-image-preview:
       api_key: ${XIAOLE_API_KEY}
       base_url: ${XIAOLE_BASE_URL}

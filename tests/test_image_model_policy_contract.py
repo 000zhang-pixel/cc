@@ -53,6 +53,9 @@ class TestImageModelPolicyContract:
                             'prompt_policy': 'reference_first',
                             'sub_prompt_identity_lock': False,
                             'primary_reference_mode': 'reference_image',
+                            'adapter_family': 'openai',
+                            'reference_input_mode': 'input_image',
+                            'generation_size_key': 'size',
                         }
                     }
                 }

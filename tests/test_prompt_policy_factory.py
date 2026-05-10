@@ -23,3 +23,11 @@ def test_prompt_policy_factory_returns_identity_first_for_nanobanana2():
 def test_prompt_policy_factory_falls_back_to_identity_first_for_unknown_models():
     policy = get_image_prompt_policy('some-future-model')
     assert isinstance(policy, IdentityFirstPolicy)
+
+
+def test_prompt_policy_factory_can_route_from_explicit_capability_override():
+    policy = get_image_prompt_policy(
+        'some-future-model',
+        capability={'prompt_policy': 'reference_first'},
+    )
+    assert isinstance(policy, ReferenceFirstPolicy)

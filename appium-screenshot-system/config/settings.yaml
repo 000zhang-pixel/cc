@@ -1,0 +1,123 @@
+appium:
+  server_url: "http://localhost:4723"
+  api_version: "/wd/hub"
+  timeout: 60
+  new_command_timeout: 300
+
+ios:
+  platform_name: "iOS"
+  platform_version: "17.0"        # 根据设备实际版本修改
+  device_name: "iPhone"           # 设备名称
+  udid: ""                        # 用 `idevice_id -l` 获取
+  automation_name: "XCUITest"
+  no_reset: true
+  full_reset: false
+  language: "zh"
+  locale: "zh_CN"
+  wda_local_port: 8100
+  screenshot_quality: 1          # 0=低,1=中,2=高
+
+windows:
+  platform_name: "Windows"
+  automation_name: "WinAppDriver"
+  winapp_server_url: "http://127.0.0.1:4727"
+  app: "Root"
+
+apps:
+  xiaohongshu:
+    name: "小红书"
+    bundle_id_ios: "com.xingin.discover"
+    win_app_id: ""                 # Windows Store App ID（可选）
+    search_wait: 3.0
+    result_wait: 2.5
+    scroll_pause: 1.5
+    max_results: 30
+    locators:
+      ios:
+        search_button: {by: "accessibility id", value: "搜索"}
+        search_field: {by: "class name", value: "XCUIElementTypeTextField"}
+        search_confirm: {by: "accessibility id", value: "搜索"}
+        result_container: {by: "class name", value: "XCUIElementTypeCollectionView"}
+        result_item: {by: "class name", value: "XCUIElementTypeCell"}
+        item_title: {by: "xpath", value: ".//XCUIElementTypeStaticText[1]"}
+        item_author: {by: "xpath", value: ".//XCUIElementTypeStaticText[2]"}
+        item_likes: {by: "xpath", value: ".//XCUIElementTypeStaticText[last()]"}
+
+  douyin:
+    name: "抖音"
+    bundle_id_ios: "com.ss.iphone.ugc.Aweme"
+    win_app_id: ""
+    search_wait: 3.0
+    result_wait: 2.5
+    scroll_pause: 1.5
+    max_results: 30
+    locators:
+      ios:
+        search_button: {by: "accessibility id", value: "搜索"}
+        search_field: {by: "class name", value: "XCUIElementTypeTextField"}
+        search_confirm: {by: "accessibility id", value: "搜索"}
+        video_tab: {by: "accessibility id", value: "视频"}
+        result_container: {by: "class name", value: "XCUIElementTypeScrollView"}
+        result_item: {by: "class name", value: "XCUIElementTypeCell"}
+        item_title: {by: "xpath", value: ".//XCUIElementTypeStaticText[1]"}
+        item_author: {by: "xpath", value: ".//XCUIElementTypeStaticText[2]"}
+        item_likes: {by: "xpath", value: ".//XCUIElementTypeStaticText[3]"}
+
+  wechat:
+    name: "微信"
+    bundle_id_ios: "com.tencent.xin"
+    win_app_id: ""
+    search_wait: 3.0
+    result_wait: 2.5
+    scroll_pause: 1.5
+    max_results: 20
+    locators:
+      ios:
+        search_button: {by: "accessibility id", value: "搜索"}
+        search_field: {by: "class name", value: "XCUIElementTypeTextField"}
+        search_confirm: {by: "accessibility id", value: "搜索"}
+        article_tab: {by: "accessibility id", value: "公众号"}
+        result_container: {by: "class name", value: "XCUIElementTypeScrollView"}
+        result_item: {by: "class name", value: "XCUIElementTypeCell"}
+        item_title: {by: "xpath", value: ".//XCUIElementTypeStaticText[1]"}
+        item_author: {by: "xpath", value: ".//XCUIElementTypeStaticText[2]"}
+
+screenshot:
+  output_dir: "output/screenshots"
+  scroll_distance: 800            # 每次滚动像素距离
+  scroll_count: 15                # 最多滚动次数
+  scroll_pause: 1.5               # 滚动后等待秒数
+  stitch_overlap: 100             # 截图拼接时的重叠检测窗口（像素）
+  status_bar_height: 44           # iOS 状态栏高度（像素），从截图中裁剪
+
+ocr:
+  languages: ["ch_sim", "en"]    # EasyOCR 语言
+  gpu: false
+  confidence_threshold: 0.5
+
+sentiment:
+  positive_threshold: 0.6         # SnowNLP 分数 > 此值 = 正面
+  negative_threshold: 0.4         # SnowNLP 分数 < 此值 = 负面
+  positive_keywords:
+    - 好用
+    - 推荐
+    - 优质
+    - 种草
+    - 爱了
+    - 绝绝子
+    - 超好
+    - 值得买
+  negative_keywords:
+    - 踩雷
+    - 差评
+    - 不推荐
+    - 退货
+    - 坑
+    - 难用
+    - 失望
+
+output:
+  excel_dir: "output/data"
+  report_dir: "output/reports"
+  timestamp_in_filename: true
+  max_rows_per_sheet: 1000

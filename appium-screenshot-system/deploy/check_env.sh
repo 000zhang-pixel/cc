@@ -1,5 +1,5 @@
 #!/bin/bash
-# 环境检查：显示所有依赖状态
+# 环境全面检查
 cd "$(dirname "$0")/.."
 
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; BLUE='\033[0;34m'; NC='\033[0m'
@@ -8,77 +8,71 @@ warn() { echo -e "  ${YELLOW}⚠${NC}  $1"; }
 fail() { echo -e "  ${RED}✘${NC}  $1"; }
 
 echo
-echo "━━ 环境检查 ━━"
+echo "━━ 系统 & 工具 ━━"
+command -v brew &>/dev/null && ok "Homebrew: $(brew --version | head -1)" || fail "Homebrew 未安装"
+command -v node &>/dev/null && ok "Node.js: $(node --version)" || fail "Node.js 未安装"
+xcode-select -p &>/dev/null && ok "Xcode CLT: $(xcode-select -p)" || fail "Xcode CLT 未安装"
+
 echo
-
-# Python
-if command -v python3 &>/dev/null; then
-    ok "Python: $(python3 --version)"
-else
-    fail "Python3 未安装"
-fi
-
-# 虚拟环境
-if [ -d ".venv" ]; then
-    ok ".venv 虚拟环境存在"
-else
-    warn ".venv 不存在（请先运行 bash deploy/install.sh）"
-fi
-
-# Python 包
+echo "━━ Python ━━"
+[ -d ".venv" ] && ok ".venv 虚拟环境存在" || warn ".venv 不存在（请运行 bash deploy/install.sh）"
 if [ -f ".venv/bin/activate" ]; then
     source .venv/bin/activate
-    for pkg in appium selenium PIL pandas openpyxl loguru rich; do
-        python -c "import $pkg" 2>/dev/null && ok "Python: $pkg" || fail "Python: $pkg 未安装"
+    ok "Python: $(python --version)"
+    for pkg in appium selenium PIL pandas openpyxl loguru rich yaml; do
+        python -c "import $pkg" 2>/dev/null && ok "  $pkg" || fail "  $pkg 未安装"
     done
-    python -c "import snownlp" 2>/dev/null && ok "Python: snownlp（情感分析）" || warn "Python: snownlp 未安装（用关键词规则替代）"
-    python -c "import easyocr" 2>/dev/null && ok "Python: easyocr（OCR）" || warn "Python: easyocr 未安装（OCR 功能不可用）"
+    python -c "import snownlp" 2>/dev/null && ok "  snownlp（情感分析）" || warn "  snownlp 未装（用规则替代）"
+    python -c "import easyocr"  2>/dev/null && ok "  easyocr（OCR）"     || warn "  easyocr 未装（OCR 不可用）"
 fi
 
 echo
-# Node / npm
-command -v node &>/dev/null && ok "Node.js: $(node --version)" || fail "Node.js 未安装"
-command -v npm &>/dev/null && ok "npm: $(npm --version)" || fail "npm 未安装"
-
-echo
-# Appium
+echo "━━ Appium ━━"
 if command -v appium &>/dev/null; then
     ok "Appium: $(appium --version)"
-    appium driver list --installed 2>/dev/null | grep -q xcuitest && ok "Appium driver: xcuitest" || warn "Appium driver: xcuitest 未安装"
-    appium driver list --installed 2>/dev/null | grep -q windows && ok "Appium driver: windows" || warn "Appium driver: windows 未安装"
+    appium driver list --installed 2>/dev/null | grep -q uiautomator2 \
+        && ok "  驱动: uiautomator2 (Android)" || warn "  驱动: uiautomator2 未安装 → appium driver install uiautomator2"
+    appium driver list --installed 2>/dev/null | grep -q xcuitest \
+        && ok "  驱动: xcuitest (iOS)" || warn "  驱动: xcuitest 未安装 → appium driver install xcuitest"
 else
     fail "Appium 未安装（npm install -g appium）"
 fi
 
+curl -s http://localhost:4723/status &>/dev/null \
+    && ok "Appium Server 运行中（:4723）" || warn "Appium Server 未运行（appium --port 4723）"
+
 echo
-# Appium 运行状态
-if curl -s http://localhost:4723/status &>/dev/null; then
-    ok "Appium Server 运行中（localhost:4723）"
+echo "━━ Android / 小米 ━━"
+if command -v adb &>/dev/null; then
+    ok "adb: $(adb version | head -1)"
+    SERIAL=$(adb devices 2>/dev/null | awk 'NR>1 && /device$/{print $1; exit}')
+    if [ -n "$SERIAL" ]; then
+        MODEL=$(adb -s "$SERIAL" shell getprop ro.product.model 2>/dev/null | tr -d '\r')
+        AVER=$(adb -s "$SERIAL" shell getprop ro.build.version.release 2>/dev/null | tr -d '\r')
+        ok "设备已连接: $SERIAL  [$MODEL  Android $AVER]"
+        # 检查 USB 调试状态
+        DEBUG=$(adb -s "$SERIAL" shell settings get global adb_enabled 2>/dev/null | tr -d '\r')
+        [ "$DEBUG" = "1" ] && ok "USB 调试已开启" || warn "USB 调试状态未知"
+        # 检查 settings.yaml 中的 UDID 是否匹配
+        CFG_UDID=$(python -c "import yaml; c=yaml.safe_load(open('config/settings.yaml')); print(c.get('android',{}).get('udid',''))" 2>/dev/null)
+        if [ "$CFG_UDID" = "$SERIAL" ]; then
+            ok "settings.yaml UDID 已配置 ✔"
+        else
+            warn "settings.yaml android.udid=\"$CFG_UDID\"（当前设备 $SERIAL，运行 calibrate.sh 更新）"
+        fi
+    else
+        warn "未检测到 Android 设备（连接手机 USB，选「文件传输」，允许 USB 调试）"
+    fi
 else
-    warn "Appium Server 未运行（运行: appium --port 4723）"
+    fail "adb 未安装（brew install android-platform-tools）"
 fi
 
 echo
-# iOS 工具
+echo "━━ iOS（可选）━━"
 command -v idevice_id &>/dev/null && ok "libimobiledevice 已安装" || warn "libimobiledevice 未安装（brew install libimobiledevice）"
-command -v ios-deploy &>/dev/null && ok "ios-deploy 已安装" || warn "ios-deploy 未安装（brew install ios-deploy）"
-
-# iOS 设备
 UDID=$(idevice_id -l 2>/dev/null | head -1)
-if [ -n "$UDID" ]; then
-    ok "iOS 设备已连接: $UDID"
-else
-    warn "未检测到 iOS 设备（请连接 iPhone 并解锁）"
-fi
+[ -n "$UDID" ] && ok "iOS 设备已连接: $UDID" || warn "未检测到 iOS 设备"
 
 echo
-# Xcode
-if xcode-select -p &>/dev/null; then
-    ok "Xcode CLT: $(xcode-select -p)"
-else
-    fail "Xcode Command Line Tools 未安装"
-fi
-
-echo
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo

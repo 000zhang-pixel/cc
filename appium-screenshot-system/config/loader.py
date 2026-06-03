@@ -29,7 +29,7 @@ class ConfigLoader:
 
     def appium_url(self) -> str:
         base = self.get("appium", "server_url", default="http://localhost:4723")
-        ver = self.get("appium", "api_version", default="/wd/hub")
+        ver = self.get("appium", "api_version", default="")
         return f"{base}{ver}"
 
     def ios_caps(self, bundle_id: str) -> dict:
@@ -38,6 +38,38 @@ class ConfigLoader:
         base.setdefault("automationName", "XCUITest")
         return base
 
+    def android_caps(self, package: str, activity: str = "") -> dict:
+        """构建 Android UIAutomator2 capabilities（兼容 Appium 2.x W3C 格式）"""
+        raw = dict(self._settings.get("android", {}))
+        # W3C 格式要求 appium: 前缀的 capability 用 appium:xxx 键名
+        caps: dict = {"platformName": raw.pop("platform_name", "Android")}
+        rename = {
+            "automation_name": "appium:automationName",
+            "device_name": "appium:deviceName",
+            "udid": "appium:udid",
+            "platform_version": "appium:platformVersion",
+            "no_reset": "appium:noReset",
+            "full_reset": "appium:fullReset",
+            "language": "appium:language",
+            "locale": "appium:locale",
+            "new_command_timeout": "appium:newCommandTimeout",
+            "unicode_keyboard": "appium:unicodeKeyboard",
+            "reset_keyboard": "appium:resetKeyboard",
+            "disable_window_animation": "appium:disableWindowAnimation",
+            "skip_device_initialization": "appium:skipDeviceInitialization",
+            "auto_grant_permissions": "appium:autoGrantPermissions",
+        }
+        for k, v in raw.items():
+            caps[rename.get(k, f"appium:{k}")] = v
+        caps["appium:appPackage"] = package
+        if activity:
+            caps["appium:appActivity"] = activity
+        caps["appium:noReset"] = caps.get("appium:noReset", True)
+        # 去掉空字符串的 platformVersion（让 Appium 自动检测）
+        if not caps.get("appium:platformVersion"):
+            caps.pop("appium:platformVersion", None)
+        return caps
+
     def windows_caps(self, app_id: str = "Root") -> dict:
         base = dict(self._settings.get("windows", {}))
         base["app"] = app_id
@@ -45,6 +77,9 @@ class ConfigLoader:
 
     def app_config(self, app_name: str) -> dict:
         return self._settings.get("apps", {}).get(app_name, {})
+
+    def android_udid(self) -> str:
+        return self.get("android", "udid", default="")
 
     def keywords_for(self, app_name: str) -> list[str]:
         common = self._keywords.get("common", [])

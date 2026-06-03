@@ -11,6 +11,7 @@ from rich.table import Table
 from rich.console import Console
 
 from drivers.ios_driver import IOSDriver
+from drivers.android_driver import AndroidDriver
 from drivers.windows_driver import WindowsDriver
 from apps.xiaohongshu import XiaohongshuApp
 from apps.douyin import DouyinApp
@@ -142,20 +143,28 @@ class Orchestrator:
 
     def _resolve_platforms(self) -> list[tuple]:
         platforms = []
+
         if self.args.platform in ("ios", "both"):
-            ios_caps = {}
-            # Build caps per first app in list for iOS
             if self.args.apps:
-                first_app = self.args.apps[0]
-                bundle_id = self.config.app_config(first_app).get(
+                bundle_id = self.config.app_config(self.args.apps[0]).get(
                     "bundle_id_ios", "com.xingin.discover"
                 )
                 ios_caps = self.config.ios_caps(bundle_id)
+            else:
+                ios_caps = self.config.ios_caps("com.xingin.discover")
             platforms.append(("iOS", IOSDriver, ios_caps))
 
-        if self.args.platform in ("windows", "both"):
-            win_url = self.config.get("windows", "winapp_server_url",
-                                      default="http://127.0.0.1:4727")
+        if self.args.platform in ("android",):
+            if self.args.apps:
+                app_cfg = self.config.app_config(self.args.apps[0])
+                package = app_cfg.get("package_android", "com.xingin.discover")
+                activity = app_cfg.get("activity_android", "")
+                android_caps = self.config.android_caps(package, activity)
+            else:
+                android_caps = self.config.android_caps("com.xingin.discover")
+            platforms.append(("Android", AndroidDriver, android_caps))
+
+        if self.args.platform in ("windows",):
             win_caps = self.config.windows_caps()
             platforms.append(("Windows", WindowsDriver, win_caps))
 

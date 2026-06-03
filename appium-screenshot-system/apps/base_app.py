@@ -31,13 +31,16 @@ class BaseApp(ABC):
         app_cfg = config.app_config(self.app_name)
         ss_cfg = config.screenshot_cfg()
 
+        # 根据实际 driver 类型自动判断平台
+        from drivers.android_driver import AndroidDriver
+        self.is_android: bool = isinstance(driver, AndroidDriver)
+        platform_key = "android" if self.is_android else "ios"
+
         self.max_results: int = app_cfg.get("max_results", 30)
         self.search_wait: float = app_cfg.get("search_wait", 3.0)
         self.result_wait: float = app_cfg.get("result_wait", 2.5)
         self.scroll_pause: float = app_cfg.get("scroll_pause", 1.5)
-        self.locators: dict = app_cfg.get("locators", {}).get(
-            "ios" if self.platform_name == "iOS" else "windows", {}
-        )
+        self.locators: dict = app_cfg.get("locators", {}).get(platform_key, {})
 
         ss_out = ss_cfg.get("output_dir", "output/screenshots")
         self.capture = ScreenshotCapture(
@@ -109,17 +112,38 @@ class BaseApp(ABC):
     # ──────────────────────────── helpers ────────────────────────────────
 
     def _loc(self, key: str) -> tuple[str, str]:
-        """从 locator 配置取 (by, value)"""
+        """从 locator 配置取 (by, value)，支持 uia 类型"""
         loc = self.locators.get(key, {})
         return loc.get("by", "accessibility id"), loc.get("value", key)
 
     def _try_tap(self, key: str) -> bool:
         by, value = self._loc(key)
-        el = self.driver.try_find(by, value)
+        if by == "uia" and self.is_android:
+            from drivers.android_driver import AndroidDriver
+            assert isinstance(self.driver, AndroidDriver)
+            el = None
+            try:
+                el = self.driver.find_by_uia(value, timeout=5)
+            except Exception:
+                pass
+        else:
+            el = self.driver.try_find(by, value)
         if el:
             el.click()
             return True
         return False
+
+    def _find_el(self, key: str, timeout: int = 10):
+        """找单个元素，支持 uia 选择器"""
+        by, value = self._loc(key)
+        if by == "uia" and self.is_android:
+            from drivers.android_driver import AndroidDriver
+            assert isinstance(self.driver, AndroidDriver)
+            try:
+                return self.driver.find_by_uia(value, timeout=timeout)
+            except Exception:
+                return None
+        return self.driver.try_find(by, value)
 
     def _scroll_to_load_more(self, current_count: int, target: int) -> bool:
         """滚动以加载更多内容，返回 False 表示已到底"""

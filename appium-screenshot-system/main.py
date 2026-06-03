@@ -38,9 +38,9 @@ def parse_args():
     )
     parser.add_argument(
         "--platform",
-        choices=["ios", "windows", "both"],
-        default="ios",
-        help="目标平台（默认 ios）",
+        choices=["ios", "android", "windows"],
+        default="android",
+        help="目标平台（默认 android）",
     )
     parser.add_argument(
         "--apps",

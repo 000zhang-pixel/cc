@@ -6,121 +6,142 @@ from appium.webdriver.common.appiumby import AppiumBy
 
 from apps.base_app import BaseApp
 from models.content_item import ContentItem
-from utils.helpers import parse_count, safe_filename
+from utils.helpers import parse_count
 
 
 class XiaohongshuApp(BaseApp):
-    """小红书 iOS 自动化"""
+    """小红书自动化（iOS & Android）"""
 
-    platform_name = "iOS"
+    platform_name = "iOS"   # 默认值；实际由 driver 类型覆盖
     app_name = "xiaohongshu"
-    BUNDLE_ID = "com.xingin.discover"
+    BUNDLE_IOS = "com.xingin.discover"
+    PACKAGE_ANDROID = "com.xingin.discover"
+    ACTIVITY_ANDROID = "com.xingin.discover.activity.SplashActivity"
 
     # ──────────────────────────── lifecycle ──────────────────────────────
 
     def open(self) -> None:
-        from drivers.ios_driver import IOSDriver
-        assert isinstance(self.driver, IOSDriver)
-        self.driver.launch_app(self.BUNDLE_ID)
-        self.driver.dismiss_alert()
+        if self.is_android:
+            from drivers.android_driver import AndroidDriver
+            assert isinstance(self.driver, AndroidDriver)
+            self.driver.launch_app(self.PACKAGE_ANDROID, self.ACTIVITY_ANDROID)
+        else:
+            from drivers.ios_driver import IOSDriver
+            assert isinstance(self.driver, IOSDriver)
+            self.driver.launch_app(self.BUNDLE_IOS)
+            self.driver.dismiss_alert()
         time.sleep(self.search_wait)
 
     # ──────────────────────────── search ─────────────────────────────────
 
     def search(self, keyword: str) -> bool:
-        driver = self.driver
-        logger.debug(f"[XHS] 搜索: {keyword}")
+        logger.debug(f"[XHS/{('Android' if self.is_android else 'iOS')}] 搜索: {keyword}")
+        if self.is_android:
+            return self._search_android(keyword)
+        return self._search_ios(keyword)
 
-        # 点击首页搜索入口（多种定位策略容错）
-        search_tapped = False
+    def _search_android(self, keyword: str) -> bool:
+        drv = self.driver
+        # 多种方式找搜索入口
         for by, val in [
-            ("accessibility id", "搜索"),
-            ("xpath", '//XCUIElementTypeButton[@name="搜索"]'),
-            ("xpath", '//XCUIElementTypeSearchField'),
+            (AppiumBy.ANDROID_UIAUTOMATOR, 'new UiSelector().description("搜索")'),
+            (AppiumBy.ANDROID_UIAUTOMATOR, 'new UiSelector().resourceIdMatches(".*search.*")'),
+            (AppiumBy.XPATH, '//*[@content-desc="搜索" or @text="搜索"]'),
         ]:
-            el = driver.try_find(by, val)
+            el = drv.try_find(by, val)
             if el:
                 el.click()
-                search_tapped = True
                 break
-
-        if not search_tapped:
-            logger.warning("[XHS] 未找到搜索入口")
+        else:
+            logger.warning("[XHS] Android: 未找到搜索入口")
             return False
 
         time.sleep(1.0)
 
-        # 输入关键词
+        # 输入框
         field = None
         for by, val in [
-            ("class name", "XCUIElementTypeTextField"),
-            ("class name", "XCUIElementTypeSearchField"),
-            ("xpath", '//XCUIElementTypeTextField'),
+            (AppiumBy.CLASS_NAME, "android.widget.EditText"),
+            (AppiumBy.XPATH, '//android.widget.EditText'),
         ]:
-            field = driver.try_find(by, val)
+            field = drv.try_find(by, val)
             if field:
                 break
-
         if not field:
-            logger.warning("[XHS] 未找到搜索输入框")
+            logger.warning("[XHS] Android: 未找到输入框")
             return False
 
         field.clear()
         field.send_keys(keyword)
-        time.sleep(0.8)
-
-        # 确认搜索（键盘搜索按钮）
-        driver.hide_keyboard()
         time.sleep(0.5)
 
-        # 有些版本有独立的"搜索"确认按钮
-        confirm = driver.try_find("xpath",
-            f'//XCUIElementTypeButton[@name="搜索" or @name="Search"]')
-        if confirm:
-            confirm.click()
-
+        # 按搜索键
+        from drivers.android_driver import AndroidDriver
+        assert isinstance(drv, AndroidDriver)
+        drv.press_search_key()
         time.sleep(self.result_wait)
         return True
 
-    # ──────────────────────────── data collection ─────────────────────────
+    def _search_ios(self, keyword: str) -> bool:
+        drv = self.driver
+        for by, val in [
+            ("accessibility id", "搜索"),
+            ("xpath", '//XCUIElementTypeButton[@name="搜索"]'),
+        ]:
+            el = drv.try_find(by, val)
+            if el:
+                el.click()
+                break
+        else:
+            return False
+
+        time.sleep(1.0)
+        field = drv.try_find("class name", "XCUIElementTypeTextField")
+        if not field:
+            return False
+        field.clear()
+        field.send_keys(keyword)
+        time.sleep(0.5)
+        drv.hide_keyboard()
+        time.sleep(self.result_wait)
+        return True
+
+    # ──────────────────────────── collection ─────────────────────────────
 
     def collect_items(self, keyword: str, max_count: int) -> list[ContentItem]:
         items: list[ContentItem] = []
-        seen_titles: set[str] = set()
-        scroll_attempts = 0
-        max_scrolls = 20
+        seen: set[str] = set()
+        scrolls = 0
 
-        logger.info(f"[XHS] 开始采集，目标 {max_count} 条")
-
-        while len(items) < max_count and scroll_attempts < max_scrolls:
-            cells = self._find_result_cells()
-            logger.debug(f"[XHS] 当前屏幕 {len(cells)} 个 cell，已采集 {len(items)} 条")
-
+        while len(items) < max_count and scrolls < 25:
+            cells = self._find_cells()
+            logger.debug(f"[XHS] 屏幕 {len(cells)} 个 cell，已采集 {len(items)}")
             for cell in cells:
                 if len(items) >= max_count:
                     break
-                item = self._parse_cell(cell, keyword, rank=len(items) + 1, seen=seen_titles)
+                item = self._parse_cell(cell, keyword, len(items) + 1, seen)
                 if item:
                     items.append(item)
-                    seen_titles.add(item.title)
-
+                    seen.add(item.title)
             if len(items) >= max_count:
                 break
-
             self.driver.scroll_down()
             time.sleep(self.scroll_pause)
-            scroll_attempts += 1
+            scrolls += 1
 
-        logger.info(f"[XHS] 采集完毕，共 {len(items)} 条")
         return items
 
-    # ──────────────────────────── cell parsing ────────────────────────────
-
-    def _find_result_cells(self) -> list:
-        for by, val in [
-            (AppiumBy.CLASS_NAME, "XCUIElementTypeCell"),
-            (AppiumBy.XPATH, '//XCUIElementTypeCell'),
-        ]:
+    def _find_cells(self) -> list:
+        if self.is_android:
+            selectors = [
+                (AppiumBy.XPATH, '//androidx.recyclerview.widget.RecyclerView/android.view.ViewGroup'),
+                (AppiumBy.XPATH, '//android.widget.FrameLayout[@clickable="true"]'),
+            ]
+        else:
+            selectors = [
+                (AppiumBy.CLASS_NAME, "XCUIElementTypeCell"),
+            ]
+        for by, val in selectors:
             cells = self.driver.driver.find_elements(by, val)
             if cells:
                 return cells
@@ -128,20 +149,19 @@ class XiaohongshuApp(BaseApp):
 
     def _parse_cell(self, cell, keyword: str, rank: int,
                     seen: set[str]) -> ContentItem | None:
-        texts = self.extractor.texts_from_children(cell)
+        texts = self.extractor.texts_from_children(
+            cell,
+            by="class name",
+            value="android.widget.TextView" if self.is_android else "XCUIElementTypeStaticText",
+        )
         if not texts:
             return None
-
-        title = texts[0] if texts else ""
+        title = texts[0]
         if not title or title in seen:
             return None
 
         author = texts[1] if len(texts) > 1 else ""
-
-        # 解析互动数据
-        stats = self.extractor.parse_stats_from_texts(texts[2:] if len(texts) > 2 else [])
-
-        # 单 item 截图
+        stats = self.extractor.parse_stats_from_texts(texts[2:])
         ss_path = self._item_screenshot(cell, keyword, rank)
 
         item = ContentItem(
@@ -153,17 +173,13 @@ class XiaohongshuApp(BaseApp):
             likes=stats["likes"],
             comments=stats["comments"],
             collects=stats["collects"],
-            content_type=self._detect_type(texts),
+            content_type="video" if self._is_video(texts) else "image",
             tags=self.extractor.extract_tags(" ".join(texts)),
             screenshot_path=ss_path,
         )
         item.compute_engagement()
         return item
 
-    def _detect_type(self, texts: list[str]) -> str:
-        joined = " ".join(texts).lower()
-        if any(k in joined for k in ["视频", "video", "▶"]):
-            return "video"
-        if any(k in joined for k in ["图文", "图片"]):
-            return "image"
-        return "image"
+    @staticmethod
+    def _is_video(texts: list[str]) -> bool:
+        return any(k in " ".join(texts) for k in ["视频", "video", "▶"])

@@ -1,104 +1,155 @@
 appium:
-  server_url: "http://127.0.0.1:4723"   # Mac 本机，端口默认 4723
+  server_url: "http://127.0.0.1:4723"   # Mac 本机，Appium 默认端口
   api_version: ""                         # Appium 2.x 不需要 /wd/hub
   timeout: 60
   new_command_timeout: 300
 
+# ── iOS 设备 ───────────────────────────────────────────────────────────────
 ios:
   platform_name: "iOS"
-  platform_version: "17.0"        # 用 deploy/check_env.sh 查，或在设置→通用→关于本机确认
-  device_name: "iPhone"           # 设备名，随意填，UDID 才是关键
-  udid: ""                        # 运行 deploy/calibrate.sh 会自动填写；或手动: idevice_id -l
-  udid: ""                        # 用 `idevice_id -l` 获取
+  platform_version: "17.0"        # 设置→通用→关于本机 确认
+  device_name: "iPhone"
+  udid: ""                        # deploy/calibrate.sh 会自动写入；或: idevice_id -l
   automation_name: "XCUITest"
   no_reset: true
   full_reset: false
   language: "zh"
   locale: "zh_CN"
   wda_local_port: 8100
-  screenshot_quality: 1          # 0=低,1=中,2=高
+  screenshot_quality: 1
 
+# ── Android 设备（小米/Redmi/Poco 均适用）────────────────────────────────
+android:
+  platform_name: "Android"
+  automation_name: "UiAutomator2"
+  device_name: "Xiaomi"           # 随意填，serial（udid）才是关键
+  udid: ""                        # deploy/calibrate.sh --android 自动写入；或: adb devices
+  platform_version: ""            # 留空 Appium 会自动检测；或填 "13" / "14"
+  no_reset: true
+  full_reset: false
+  language: "zh"
+  locale: "CN"
+  new_command_timeout: 300
+  unicode_keyboard: true          # 支持中文输入
+  reset_keyboard: true
+  # 小米 MIUI 专项配置
+  disable_window_animation: true  # 关闭动画，加速测试
+  skip_device_initialization: false
+  auto_grant_permissions: true    # 自动授权 App 权限，减少弹窗
+
+# ── Windows 桌面（可选）──────────────────────────────────────────────────
 windows:
   platform_name: "Windows"
   automation_name: "WinAppDriver"
   winapp_server_url: "http://127.0.0.1:4727"
   app: "Root"
 
+# ── App 配置 ─────────────────────────────────────────────────────────────
 apps:
   xiaohongshu:
     name: "小红书"
     bundle_id_ios: "com.xingin.discover"
-    win_app_id: ""                 # Windows Store App ID（可选）
+    package_android: "com.xingin.discover"
+    activity_android: "com.xingin.discover.activity.SplashActivity"
     search_wait: 3.0
     result_wait: 2.5
     scroll_pause: 1.5
     max_results: 30
     locators:
       ios:
-        search_button: {by: "accessibility id", value: "搜索"}
-        search_field: {by: "class name", value: "XCUIElementTypeTextField"}
-        search_confirm: {by: "accessibility id", value: "搜索"}
-        result_container: {by: "class name", value: "XCUIElementTypeCollectionView"}
-        result_item: {by: "class name", value: "XCUIElementTypeCell"}
-        item_title: {by: "xpath", value: ".//XCUIElementTypeStaticText[1]"}
-        item_author: {by: "xpath", value: ".//XCUIElementTypeStaticText[2]"}
-        item_likes: {by: "xpath", value: ".//XCUIElementTypeStaticText[last()]"}
+        search_button:    {by: "accessibility id", value: "搜索"}
+        search_field:     {by: "class name",       value: "XCUIElementTypeTextField"}
+        search_confirm:   {by: "accessibility id", value: "搜索"}
+        result_item:      {by: "class name",       value: "XCUIElementTypeCell"}
+        item_title:       {by: "xpath",            value: ".//XCUIElementTypeStaticText[1]"}
+        item_author:      {by: "xpath",            value: ".//XCUIElementTypeStaticText[2]"}
+        item_likes:       {by: "xpath",            value: ".//XCUIElementTypeStaticText[last()]"}
+      android:
+        # UIAutomator 选择器（最稳定，文本匹配不依赖版本）
+        search_button:    {by: "uia", value: 'new UiSelector().description("搜索")'}
+        search_field:     {by: "class name", value: "android.widget.EditText"}
+        search_confirm:   {by: "uia", value: 'new UiSelector().text("搜索")'}
+        result_list:      {by: "class name", value: "androidx.recyclerview.widget.RecyclerView"}
+        result_item:      {by: "xpath",      value: '//androidx.recyclerview.widget.RecyclerView/android.view.ViewGroup'}
+        item_title:       {by: "xpath",      value: './/android.widget.TextView[1]'}
+        item_author:      {by: "xpath",      value: './/android.widget.TextView[2]'}
+        item_likes:       {by: "xpath",      value: './/android.widget.TextView[last()]'}
 
   douyin:
     name: "抖音"
     bundle_id_ios: "com.ss.iphone.ugc.Aweme"
-    win_app_id: ""
+    package_android: "com.ss.android.ugc.aweme"
+    activity_android: "com.ss.android.ugc.aweme.splash.SplashActivity"
     search_wait: 3.0
     result_wait: 2.5
     scroll_pause: 1.5
     max_results: 30
     locators:
       ios:
-        search_button: {by: "accessibility id", value: "搜索"}
-        search_field: {by: "class name", value: "XCUIElementTypeTextField"}
-        search_confirm: {by: "accessibility id", value: "搜索"}
-        video_tab: {by: "accessibility id", value: "视频"}
-        result_container: {by: "class name", value: "XCUIElementTypeScrollView"}
-        result_item: {by: "class name", value: "XCUIElementTypeCell"}
-        item_title: {by: "xpath", value: ".//XCUIElementTypeStaticText[1]"}
-        item_author: {by: "xpath", value: ".//XCUIElementTypeStaticText[2]"}
-        item_likes: {by: "xpath", value: ".//XCUIElementTypeStaticText[3]"}
+        search_button:    {by: "accessibility id", value: "搜索"}
+        search_field:     {by: "class name",       value: "XCUIElementTypeTextField"}
+        search_confirm:   {by: "accessibility id", value: "搜索"}
+        video_tab:        {by: "accessibility id", value: "视频"}
+        result_item:      {by: "class name",       value: "XCUIElementTypeCell"}
+        item_title:       {by: "xpath",            value: ".//XCUIElementTypeStaticText[1]"}
+        item_author:      {by: "xpath",            value: ".//XCUIElementTypeStaticText[2]"}
+        item_likes:       {by: "xpath",            value: ".//XCUIElementTypeStaticText[3]"}
+      android:
+        search_button:    {by: "uia", value: 'new UiSelector().description("搜索")'}
+        search_field:     {by: "class name", value: "android.widget.EditText"}
+        search_confirm:   {by: "uia", value: 'new UiSelector().text("搜索")'}
+        video_tab:        {by: "uia", value: 'new UiSelector().text("视频")'}
+        result_list:      {by: "class name", value: "androidx.recyclerview.widget.RecyclerView"}
+        result_item:      {by: "xpath",      value: '//androidx.recyclerview.widget.RecyclerView/android.view.ViewGroup'}
+        item_title:       {by: "xpath",      value: './/android.widget.TextView[1]'}
+        item_author:      {by: "xpath",      value: './/android.widget.TextView[2]'}
+        item_likes:       {by: "xpath",      value: './/android.widget.TextView[last()]'}
 
   wechat:
     name: "微信"
     bundle_id_ios: "com.tencent.xin"
-    win_app_id: ""
+    package_android: "com.tencent.mm"
+    activity_android: "com.tencent.mm.ui.LauncherUI"
     search_wait: 3.0
     result_wait: 2.5
     scroll_pause: 1.5
     max_results: 20
     locators:
       ios:
-        search_button: {by: "accessibility id", value: "搜索"}
-        search_field: {by: "class name", value: "XCUIElementTypeTextField"}
-        search_confirm: {by: "accessibility id", value: "搜索"}
-        article_tab: {by: "accessibility id", value: "公众号"}
-        result_container: {by: "class name", value: "XCUIElementTypeScrollView"}
-        result_item: {by: "class name", value: "XCUIElementTypeCell"}
-        item_title: {by: "xpath", value: ".//XCUIElementTypeStaticText[1]"}
-        item_author: {by: "xpath", value: ".//XCUIElementTypeStaticText[2]"}
+        search_button:    {by: "accessibility id", value: "搜索"}
+        search_field:     {by: "class name",       value: "XCUIElementTypeTextField"}
+        search_confirm:   {by: "accessibility id", value: "搜索"}
+        article_tab:      {by: "accessibility id", value: "公众号"}
+        result_item:      {by: "class name",       value: "XCUIElementTypeCell"}
+        item_title:       {by: "xpath",            value: ".//XCUIElementTypeStaticText[1]"}
+        item_author:      {by: "xpath",            value: ".//XCUIElementTypeStaticText[2]"}
+      android:
+        search_button:    {by: "uia", value: 'new UiSelector().description("搜索")'}
+        search_field:     {by: "class name", value: "android.widget.EditText"}
+        search_confirm:   {by: "uia", value: 'new UiSelector().text("搜索")'}
+        article_tab:      {by: "uia", value: 'new UiSelector().text("公众号")'}
+        result_list:      {by: "class name", value: "android.widget.ListView"}
+        result_item:      {by: "xpath",      value: '//android.widget.ListView/android.widget.LinearLayout'}
+        item_title:       {by: "xpath",      value: './/android.widget.TextView[1]'}
+        item_author:      {by: "xpath",      value: './/android.widget.TextView[2]'}
 
 screenshot:
   output_dir: "output/screenshots"
-  scroll_distance: 800            # 每次滚动像素距离
-  scroll_count: 15                # 最多滚动次数
-  scroll_pause: 1.5               # 滚动后等待秒数
-  stitch_overlap: 100             # 截图拼接时的重叠检测窗口（像素）
-  status_bar_height: 44           # iOS 状态栏高度（像素），从截图中裁剪
+  scroll_distance: 800
+  scroll_count: 15
+  scroll_pause: 1.5
+  stitch_overlap: 100
+  status_bar_height: 44           # iOS 状态栏高度
+  android_status_bar_height: 80  # Android/MIUI 状态栏（含 notch）
 
 ocr:
-  languages: ["ch_sim", "en"]    # EasyOCR 语言
+  languages: ["ch_sim", "en"]
   gpu: false
   confidence_threshold: 0.5
 
 sentiment:
-  positive_threshold: 0.6         # SnowNLP 分数 > 此值 = 正面
-  negative_threshold: 0.4         # SnowNLP 分数 < 此值 = 负面
+  positive_threshold: 0.6
+  negative_threshold: 0.4
   positive_keywords:
     - 好用
     - 推荐

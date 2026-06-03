@@ -6,136 +6,167 @@ from appium.webdriver.common.appiumby import AppiumBy
 
 from apps.base_app import BaseApp
 from models.content_item import ContentItem
-from utils.helpers import parse_count
 
 
 class DouyinApp(BaseApp):
-    """抖音 iOS 自动化"""
+    """抖音自动化（iOS & Android）"""
 
     platform_name = "iOS"
     app_name = "douyin"
-    BUNDLE_ID = "com.ss.iphone.ugc.Aweme"
+    BUNDLE_IOS = "com.ss.iphone.ugc.Aweme"
+    PACKAGE_ANDROID = "com.ss.android.ugc.aweme"
+    ACTIVITY_ANDROID = "com.ss.android.ugc.aweme.splash.SplashActivity"
+
+    # ──────────────────────────── lifecycle ──────────────────────────────
 
     def open(self) -> None:
-        from drivers.ios_driver import IOSDriver
-        assert isinstance(self.driver, IOSDriver)
-        self.driver.launch_app(self.BUNDLE_ID)
-        self.driver.dismiss_alert()
+        if self.is_android:
+            from drivers.android_driver import AndroidDriver
+            assert isinstance(self.driver, AndroidDriver)
+            self.driver.launch_app(self.PACKAGE_ANDROID, self.ACTIVITY_ANDROID)
+        else:
+            from drivers.ios_driver import IOSDriver
+            assert isinstance(self.driver, IOSDriver)
+            self.driver.launch_app(self.BUNDLE_IOS)
+            self.driver.dismiss_alert()
         time.sleep(self.search_wait)
 
     # ──────────────────────────── search ─────────────────────────────────
 
     def search(self, keyword: str) -> bool:
-        driver = self.driver
-        logger.debug(f"[Douyin] 搜索: {keyword}")
+        logger.debug(f"[Douyin/{('Android' if self.is_android else 'iOS')}] 搜索: {keyword}")
+        if self.is_android:
+            return self._search_android(keyword)
+        return self._search_ios(keyword)
 
-        # 点击搜索图标
+    def _search_android(self, keyword: str) -> bool:
+        drv = self.driver
+        # 点击搜索图标（抖音顶栏右侧放大镜）
         for by, val in [
-            ("accessibility id", "搜索"),
-            ("xpath", '//XCUIElementTypeButton[contains(@name,"搜索")]'),
-            ("xpath", '//XCUIElementTypeImage[@name="icon_homepage_search"]'),
+            (AppiumBy.ANDROID_UIAUTOMATOR, 'new UiSelector().description("搜索")'),
+            (AppiumBy.XPATH, '//*[@content-desc="搜索"]'),
+            (AppiumBy.ANDROID_UIAUTOMATOR, 'new UiSelector().resourceIdMatches(".*search.*icon.*")'),
         ]:
-            el = driver.try_find(by, val)
+            el = drv.try_find(by, val)
             if el:
                 el.click()
                 break
         else:
-            logger.warning("[Douyin] 未找到搜索入口")
+            logger.warning("[Douyin] Android: 未找到搜索入口")
             return False
 
         time.sleep(1.0)
 
-        # 输入关键词
-        for by, val in [
-            ("class name", "XCUIElementTypeTextField"),
-            ("class name", "XCUIElementTypeSearchField"),
-            ("xpath", '//XCUIElementTypeTextField'),
-        ]:
-            field = driver.try_find(by, val)
-            if field:
-                field.clear()
-                field.send_keys(keyword)
-                break
-        else:
-            logger.warning("[Douyin] 未找到搜索框")
+        field = drv.try_find(AppiumBy.CLASS_NAME, "android.widget.EditText")
+        if not field:
+            logger.warning("[Douyin] Android: 未找到输入框")
             return False
 
+        field.clear()
+        field.send_keys(keyword)
         time.sleep(0.5)
-        driver.hide_keyboard()
-        time.sleep(0.3)
 
-        # 点击搜索确认
-        for by, val in [
-            ("accessibility id", "搜索"),
-            ("xpath", '//XCUIElementTypeButton[@name="搜索"]'),
-        ]:
-            btn = driver.try_find(by, val)
-            if btn:
-                btn.click()
-                break
-
+        from drivers.android_driver import AndroidDriver
+        assert isinstance(drv, AndroidDriver)
+        drv.press_search_key()
         time.sleep(self.result_wait)
 
-        # 切换到"视频"tab（有些版本默认显示综合）
-        for tab_name in ["视频", "综合", "作品"]:
-            tab = driver.try_find("accessibility id", tab_name)
-            if tab:
-                tab.click()
+        # 切换到视频 tab
+        for tab in ["视频", "综合"]:
+            el = drv.try_find(AppiumBy.ANDROID_UIAUTOMATOR,
+                              f'new UiSelector().text("{tab}")')
+            if el:
+                el.click()
                 time.sleep(1.5)
                 break
 
+        return True
+
+    def _search_ios(self, keyword: str) -> bool:
+        drv = self.driver
+        for by, val in [
+            ("accessibility id", "搜索"),
+            ("xpath", '//XCUIElementTypeButton[contains(@name,"搜索")]'),
+        ]:
+            el = drv.try_find(by, val)
+            if el:
+                el.click()
+                break
+        else:
+            return False
+
+        time.sleep(1.0)
+        field = drv.try_find("class name", "XCUIElementTypeTextField")
+        if not field:
+            return False
+        field.clear()
+        field.send_keys(keyword)
+        time.sleep(0.5)
+        drv.hide_keyboard()
+        time.sleep(self.result_wait)
+
+        for tab in ["视频", "综合"]:
+            el = drv.try_find("accessibility id", tab)
+            if el:
+                el.click()
+                time.sleep(1.5)
+                break
         return True
 
     # ──────────────────────────── collection ─────────────────────────────
 
     def collect_items(self, keyword: str, max_count: int) -> list[ContentItem]:
         items: list[ContentItem] = []
-        seen_titles: set[str] = set()
-        scroll_attempts = 0
-        max_scrolls = 25
+        seen: set[str] = set()
+        scrolls = 0
 
-        while len(items) < max_count and scroll_attempts < max_scrolls:
-            cells = self._find_result_cells()
+        while len(items) < max_count and scrolls < 25:
+            cells = self._find_cells()
             for cell in cells:
                 if len(items) >= max_count:
                     break
-                item = self._parse_cell(cell, keyword, rank=len(items) + 1, seen=seen_titles)
+                item = self._parse_cell(cell, keyword, len(items) + 1, seen)
                 if item:
                     items.append(item)
-                    seen_titles.add(item.title)
-
+                    seen.add(item.title)
             if len(items) >= max_count:
                 break
-
             self.driver.scroll_down()
             time.sleep(self.scroll_pause)
-            scroll_attempts += 1
+            scrolls += 1
 
         return items
 
-    def _find_result_cells(self) -> list:
-        for by, val in [
-            (AppiumBy.CLASS_NAME, "XCUIElementTypeCell"),
-            (AppiumBy.XPATH, '//XCUIElementTypeCell'),
-        ]:
-            cells = self.driver.driver.find_elements(by, val)
+    def _find_cells(self) -> list:
+        if self.is_android:
+            for by, val in [
+                (AppiumBy.XPATH, '//androidx.recyclerview.widget.RecyclerView/android.view.ViewGroup'),
+                (AppiumBy.XPATH, '//android.view.ViewGroup[@clickable="true"]'),
+            ]:
+                cells = self.driver.driver.find_elements(by, val)
+                if cells:
+                    return cells
+        else:
+            cells = self.driver.driver.find_elements(AppiumBy.CLASS_NAME, "XCUIElementTypeCell")
             if cells:
                 return cells
         return []
 
     def _parse_cell(self, cell, keyword: str, rank: int,
                     seen: set[str]) -> ContentItem | None:
-        texts = self.extractor.texts_from_children(cell)
-        if not texts or len(texts) < 1:
+        texts = self.extractor.texts_from_children(
+            cell,
+            by="class name",
+            value="android.widget.TextView" if self.is_android else "XCUIElementTypeStaticText",
+        )
+        if not texts:
             return None
-
         title = texts[0]
         if not title or title in seen:
             return None
 
         author = texts[1] if len(texts) > 1 else ""
         stats = self.extractor.parse_stats_from_texts(texts[2:])
-
         ss_path = self._item_screenshot(cell, keyword, rank)
 
         item = ContentItem(

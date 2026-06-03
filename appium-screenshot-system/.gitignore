@@ -1,0 +1,23 @@
+# 虚拟环境
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# 输出文件（截图/报告/数据，不提交到 git）
+output/screenshots/
+output/data/
+output/reports/
+output/logs/
+
+# 保留 mock 示例
+!output/mock_data/.gitkeep
+!output/mock_reports/.gitkeep
+
+# macOS
+.DS_Store
+
+# EasyOCR 模型缓存（体积大）
+.EasyOCR/

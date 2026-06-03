@@ -1,13 +1,14 @@
 appium:
-  server_url: "http://localhost:4723"
-  api_version: "/wd/hub"
+  server_url: "http://127.0.0.1:4723"   # Mac 本机，端口默认 4723
+  api_version: ""                         # Appium 2.x 不需要 /wd/hub
   timeout: 60
   new_command_timeout: 300
 
 ios:
   platform_name: "iOS"
-  platform_version: "17.0"        # 根据设备实际版本修改
-  device_name: "iPhone"           # 设备名称
+  platform_version: "17.0"        # 用 deploy/check_env.sh 查，或在设置→通用→关于本机确认
+  device_name: "iPhone"           # 设备名，随意填，UDID 才是关键
+  udid: ""                        # 运行 deploy/calibrate.sh 会自动填写；或手动: idevice_id -l
   udid: ""                        # 用 `idevice_id -l` 获取
   automation_name: "XCUITest"
   no_reset: true
